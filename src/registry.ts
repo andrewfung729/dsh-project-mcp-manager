@@ -36,9 +36,10 @@
  * 缺失即跳过该条目。
  */
 import chokidar from "chokidar";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mkdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
 import * as mcpClient from "@deepseek-ai/dsh-mcp-client";
 import { extractManagedRows, readPatchFile, withPatchLock, type PatchRow } from "./mcp-file.js";
 import {
@@ -349,6 +350,16 @@ export function projectMcpJsonFile(projectRoot: string): string {
 function normalizePathKey(path: string): string {
   const resolved = resolve(path);
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+}
+
+/** 物理化单条路径（dirname 级）：目标文件尚不存在时目录通常已建，取目录的
+ * realpath 再拼回 basename；整条缺失（零配置首装）保持词法原值。 */
+function physicalPathOf(path: string): string {
+  try {
+    return join(realpathSync(dirname(path)), basename(path));
+  } catch {
+    return path;
+  }
 }
 
 /** 两个文件路径是否指向同一文件（Windows 大小写不敏感）。 */
@@ -792,14 +803,8 @@ export class ProjectMcpRegistry {
         await this.reconcileAll();
       });
     });
-    // 会话生命周期开始（含恢复/重挂的会话）也补扫一次，覆盖启动时序缺口。
-    ctx.on("agent/session-start", ({ agent }: any) => {
-      if (agent === undefined) return;
-      this.enqueue(async () => {
-        this.agentProjects.set(agent.id, await this.resolveProject(agent));
-        await this.reconcileAll();
-      });
-    });
+    // 会话生命周期补扫由 agent/created 覆盖（其 source 含 startup/resume/clear/
+    // compaction）；早先版本监听的 agent/session-start 已并入该事件，不再存在。
 
     // 插件热更重载时已存在的会话也要覆盖。
     this.enqueue(async () => {
@@ -962,11 +967,20 @@ export class ProjectMcpRegistry {
 
   // ── 用户层（~/.dsh/mcp.yml、~/.dsh/mcp.json、~/.dsh/profiles/<p>/mcp.json）──
 
-  /** 用户层三个来源文件路径：缺省跟随 dshHome（`$DSH_HOME` 优先），注入项逐键覆盖。 */
+  /** 用户层三个来源文件路径：缺省跟随 dshHome（`$DSH_HOME` 优先），注入项逐键覆盖。
+   * 一律物理化（dirname 级 realpath）：项目根已按 realpath 键控，用户层路径若保留
+   * 符号链接写法（macOS 的 /var → /private/var、DSH_HOME 指向链接目录），
+   * isSameFilePath 会认不出「用户层文件就是项目层文件」，home 落在项目树内时
+   * 同一行被双挂（全局一条 + 项目侧 p<hash>_ 改名一条）。 */
   private resolveUserLayerPaths(): UserLayerPaths {
     const defaults = userLayerPathsIn(dshHomeDir());
     const provided = this.providers.userLayerPaths;
-    return provided === undefined ? defaults : { ...defaults, ...provided };
+    const merged = provided === undefined ? defaults : { ...defaults, ...provided };
+    return {
+      mcpYml: physicalPathOf(merged.mcpYml),
+      mcpJson: physicalPathOf(merged.mcpJson),
+      profilesDir: physicalPathOf(merged.profilesDir)
+    };
   }
 
   /** 原生受管块文件通用读取（项目 yml 与用户层 yml 共用）。 */
