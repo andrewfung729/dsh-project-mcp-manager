@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { ProjectMcpRegistry, parseDiagDocument, projectMcpFile, mergeSourcedRows, profileNameFromConfigPath, UNMOUNT_GRACE_MS } from "../lib/registry.js";
@@ -138,7 +138,9 @@ function fakeAgent(id, cwd) {
   };
 }
 
-const dir = await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-registry-"));
+// 项目根一律取物理路径：与 findProjectRoot 的 realpath 归一同口径（macOS 的
+// /var → /private/var 符号链接会让词法/物理写法键控出两个项目）。
+const dir = await realpath(await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-registry-"))));
 
 // ── profile 名解析（纯函数，宿主内部路径形态）──────────────────────────────
 {
@@ -388,10 +390,10 @@ try {
   pass("registry cleanup disposes watcher and mounted fibers");
 
   // ── 10+. 遗留 CC 项目层：.mcp.json / 影子优先 / ${VAR} ──────────────────
-  const dir2 = await mkdtemp(join(tmpdir(), "dsh-mcp-cc-"));
+  const dir2 = await realpath(await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-cc-"))));
   // fake home 必须落在项目树之外（与任何项目根无祖先关系）：用户层热重载只能
   // 由用户 watcher 证明，不许借项目 watcher 的 depth 覆盖冒充。
-  const home2 = await mkdtemp(join(tmpdir(), "dsh-mcp-cc-home-"));
+  const home2 = await realpath(await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-cc-home-"))));
   await mkdir(join(home2, ".dsh"), { recursive: true });
   const savedBin = process.env.CC_TEST_BIN;
   const savedMissing = process.env.CC_TEST_MISSING;
@@ -843,7 +845,7 @@ try {
     //（此前硬编码 homedir()/.dsh，重定位后用户层整体静默失效——缺文件是合法零配置，不报错）。
     {
       const savedHome = process.env.DSH_HOME;
-      const relocated = await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-dshhome-"));
+      const relocated = await realpath(await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-dshhome-"))));
       try {
         process.env.DSH_HOME = relocated;
         await writeFile(join(relocated, "mcp.json"), JSON.stringify({
@@ -885,7 +887,7 @@ try {
     //  a) 用户层 disabled 占名行 + 项目同名行 → 该项目不得 deny 自己的工具；
     //  b) 宿主 patch 占名 + 用户层同名行被拒（name-taken）+ 项目同名行 → 不得 deny 宿主 patch 的工具。
     {
-      const home32 = await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-h1-"));
+      const home32 = await realpath(await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-h1-"))));
       const proj32 = join(dir2, "proj32");
       try {
         await mkdir(proj32, { recursive: true });
@@ -940,7 +942,7 @@ try {
     // 33. 纯用户层内部冲突按全局归因（M3/M4）：零配置项目不写 .mcp-diag.json，
     // 同名/同服务遮蔽只在全局层告警一次并写全局诊断。
     {
-      const home33 = await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-m4-"));
+      const home33 = await realpath(await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-m4-"))));
       const proj33 = join(dir2, "proj33");
       try {
         await mkdir(proj33, { recursive: true });
@@ -994,7 +996,7 @@ try {
     // 34. 告警变更门控（M1/M2）：持续存在的坏条目与持续被拒的 name-taken 行，
     // 多次对账只在集合变化时各告警一次（此前每次文件事件都重刷）。
     {
-      const home34 = await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-gate-"));
+      const home34 = await realpath(await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-gate-"))));
       const proj34 = join(dir2, "proj34");
       try {
         await mkdir(join(proj34, ".dsh"), { recursive: true });
@@ -1045,7 +1047,7 @@ try {
     // 35. profile 名校验（M10）：DSH_MCP_PROFILE 是外部输入，`../..` 之类不得被
     // join 进 profiles 目录读到目录外的文件；不合法按「解析不出」降级并告警一次。
     {
-      const home35 = await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-profile-"));
+      const home35 = await realpath(await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-profile-"))));
       const proj35 = join(dir2, "proj35");
       try {
         await mkdir(proj35, { recursive: true });
@@ -1086,8 +1088,8 @@ try {
     // 36. C4：对方 {version, servers} 项目文件写入诊断；~/.dsh/dsh-mcp.json 同理；
     // mcpServers 与 servers 并存时不告警。
     {
-      const homeF = await mkdtemp(join(tmpdir(), "dsh-mcp-foreign-home-"));
-      const projF = await mkdtemp(join(tmpdir(), "dsh-mcp-foreign-proj-"));
+      const homeF = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-foreign-home-")));
+      const projF = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-foreign-proj-")));
       try {
         await mkdir(join(projF, ".dsh"), { recursive: true });
         await writeFile(join(projF, ".dsh", "mcp.json"), JSON.stringify({ version: 1, servers: [{ name: "x" }] }), "utf8");
@@ -1144,8 +1146,8 @@ try {
 
 {
   // M8：启动时没有对方全局文件，创建 `dsh-mcp.json` 必须经用户 watcher kick 对账并诊断。
-  const homeW = await mkdtemp(join(tmpdir(), "dsh-mcp-foreign-watch-"));
-  const projW = await mkdtemp(join(tmpdir(), "dsh-mcp-foreign-watch-proj-"));
+  const homeW = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-foreign-watch-")));
+  const projW = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-foreign-watch-proj-")));
   try {
     await mkdir(join(projW, ".dsh"), { recursive: true });
     const ctxW = fakeCtx();
@@ -1193,7 +1195,7 @@ try {
 }
 
 {
-  const dirH = await mkdtemp(join(tmpdir(), "dsh-mcp-health-"));
+  const dirH = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-health-")));
   const homeH = join(dirH, "home");
   const projH = join(dirH, "proj");
   await mkdir(join(homeH, ".dsh"), { recursive: true });
@@ -1300,7 +1302,7 @@ try {
     }
     pass("registry remounts dead connections, gives up after the limit, and skips reread when fingerprints match");
 
-    const dirD = await mkdtemp(join(tmpdir(), "dsh-mcp-disabled-"));
+    const dirD = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-disabled-")));
     const projD = join(dirD, "proj");
     await mkdir(projD, { recursive: true });
     await writeManagedRows(projectMcpFile(projD), [{ ...stdioRow("off"), disabled: true }], { createIfMissing: true });
@@ -1322,7 +1324,7 @@ try {
     await rmRetry(dirD);
     pass("registry health remount never revives disabled rows");
 
-    const dirZ = await mkdtemp(join(tmpdir(), "dsh-mcp-nevertools-"));
+    const dirZ = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-nevertools-")));
     const projZ = join(dirZ, "proj");
     await mkdir(projZ, { recursive: true });
     await writeManagedRows(projectMcpFile(projZ), [stdioRow("quiet")], { createIfMissing: true });
@@ -1345,7 +1347,7 @@ try {
     await rmRetry(dirZ);
     pass("registry does not remount servers that never exposed tools");
 
-    const dirT = await mkdtemp(join(tmpdir(), "dsh-mcp-tools-"));
+    const dirT = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-tools-")));
     const projT = join(dirT, "proj");
     await mkdir(projT, { recursive: true });
     const filtered = {
@@ -1402,7 +1404,7 @@ try {
     await rmRetry(dirT);
     pass("registry expands tools.allow/deny to registered names and retries unknown denies");
 
-    const dirGlob = await mkdtemp(join(tmpdir(), "dsh-mcp-badglob-"));
+    const dirGlob = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-badglob-")));
     const projGlob = join(dirGlob, "proj");
     await mkdir(projGlob, { recursive: true });
     await writeManagedRows(projectMcpFile(projGlob), [{
@@ -1427,7 +1429,7 @@ try {
     await rmRetry(dirGlob);
     pass("registry warns on illegal tool globs without skipping the row");
 
-    const dirBgt = await mkdtemp(join(tmpdir(), "dsh-mcp-budget-"));
+    const dirBgt = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-budget-")));
     const projBgt = join(dirBgt, "proj");
     await mkdir(projBgt, { recursive: true });
     await writeManagedRows(projectMcpFile(projBgt), [stdioRow("heavy")], { createIfMissing: true });
@@ -1477,7 +1479,7 @@ try {
 }
 
 {
-  const dirSvc = await mkdtemp(join(tmpdir(), "dsh-mcp-service-"));
+  const dirSvc = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-service-")));
   const homeSvc = join(dirSvc, "home");
   const projSvc = join(dirSvc, "proj");
   await mkdir(join(homeSvc, ".dsh"), { recursive: true });
@@ -1546,7 +1548,7 @@ try {
 }
 
 {
-  const dirOn = await mkdtemp(join(tmpdir(), "dsh-mcp-ondemand-"));
+  const dirOn = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-ondemand-")));
   const homeOn = join(dirOn, "home");
   const projA = join(dirOn, "projA");
   const projB = join(dirOn, "projB");
@@ -1640,7 +1642,7 @@ try {
 }
 
 {
-  const dirT3 = await mkdtemp(join(tmpdir(), "dsh-mcp-h2-idle-"));
+  const dirT3 = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-h2-idle-")));
   const homeT3 = join(dirT3, "home");
   const projT3 = join(dirT3, "proj");
   await mkdir(join(homeT3, ".dsh"), { recursive: true });
@@ -1693,7 +1695,7 @@ try {
 }
 
 {
-  const dirM1 = await mkdtemp(join(tmpdir(), "dsh-mcp-fp-profile-"));
+  const dirM1 = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-fp-profile-")));
   const homeM1 = join(dirM1, "home");
   const projM1 = join(dirM1, "proj");
   const profilesM1 = join(homeM1, ".dsh", "profiles");
