@@ -1263,8 +1263,13 @@ try {
   // M8：启动时没有对方全局文件，创建 `dsh-mcp.json` 必须经用户 watcher kick 对账并诊断。
   const homeW = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-foreign-watch-")));
   const projW = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-foreign-watch-proj-")));
+  const savedCwdW = process.cwd();
   try {
     await mkdir(join(projW, ".dsh"), { recursive: true });
+    // 进程 cwd 兜底指向 temp 项目（与文件顶部口径一致）：仓库根若有本地
+    // .dsh/mcp.yml（未追踪、含真实行），其行会经 cwd 项目扫描进入本块
+    // registry，把「foreign 文件绝不装载」的绝对零断言污染成 1。
+    process.chdir(projW);
     const ctxW = fakeCtx();
     const registryW = new ProjectMcpRegistry(ctxW, {
       globalNames: async () => [],
@@ -1304,6 +1309,8 @@ try {
     }
     pass("registry watches ~/.dsh/dsh-mcp.json and diagnoses it without mounting");
   } finally {
+    // 先回原 cwd 再删 temp 项目:cwd 不能留在已删除的目录里。
+    process.chdir(savedCwdW);
     await rmRetry(homeW);
     await rmRetry(projW);
   }
