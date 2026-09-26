@@ -24,6 +24,7 @@ import { MCP_YML_FILE, DIAG_FILE, dshHomeFor, profileMcpJsonFile, userLayerPaths
 import { readJsonServers, toJsonEntry, updateJsonServers } from "./json-write.js";
 import { mergeSourcedRows, parseDiagDocument, projectDshJsonFile, projectMcpFile, projectMcpJsonFile, type DiagDocument, type DiagSummary, type IdentityShadow } from "./registry.js";
 import { findProjectRoot } from "./project-root.js";
+import { addTrustedProject, removeTrustedProject, trustFileIn, TRUST_ALL_ENV } from "./trust.js";
 
 export interface CliIo {
   out(line: string): void;
@@ -80,6 +81,8 @@ const HELP = `dsh-mcp —— 项目/用户/profile 级 MCP 服务器管理（原
   dsh-mcp remove <name> [--scope project|user|profile] [--format yml|json]
   dsh-mcp status [--scope project|user|profile] [--profile <name>]
   dsh-mcp import --from <file|-> [--scope project|user|profile] [--format yml|json] [--dry-run] [--overwrite] [--profile <name>]
+  dsh-mcp trust [<path>]      登记项目根到 <dshHome>/mcp-trusted.json（缺省取当前项目根）
+  dsh-mcp untrust [<path>]    从信任清单移除
 
 写入位置：
   project（缺省）  <项目根>/.dsh/mcp.yml（--format json → <项目根>/.dsh/mcp.json）
@@ -98,6 +101,8 @@ const HELP = `dsh-mcp —— 项目/用户/profile 级 MCP 服务器管理（原
   凭证类后缀变量（*TOKEN/*API_KEY/*SECRET…）默认拒绝展开（env-blocked）；DSH_MCP_EXPAND_ALLOW=名1,名2 为严格白名单。
   sse 为 MCP SSE 端点传输，不受支持（后端只支持 stdio 与 streamable-http；把 type 改为 http，或删除 type 只留 url）。
   list/get 展示全部来源层（含遗留只读层），不显示任何密钥值。
+  项目层装载默认有信任门：项目根须先 dsh-mcp trust 登记（<dshHome>/mcp-trusted.json）；
+  设 DSH_MCP_TRUST_ALL=1 关闭整道门。用户层行不受信任门约束。
   status 读取各层文件与诊断摘要（不连接运行中的宿主）。
   status --scope project|user|profile 同时过滤层列表与诊断文件（project 打项目诊断，user/profile 打全局诊断）。
   --scope profile 只列 profile 层；再配 --profile <name> 则只打该名。--scope user 仍列全部用户层（含所有 profile 文件）。
@@ -934,6 +939,38 @@ async function importWrite(
   return entryErrors.length > 0 ? 1 : 0;
 }
 
+/** trust/untrust 的目标路径：显式给出时 realpath 归一（与 findProjectRoot 键控同口径，
+ * 否则符号链接写法与装载侧的物理键控对不上）；缺省取当前项目根。 */
+async function trustTargetOf(rest: string[], deps: CliDeps): Promise<string> {
+  if (rest[0] !== undefined) {
+    const { realpath } = await import("node:fs/promises");
+    const resolved = resolve(rest[0]);
+    try {
+      return await realpath(resolved);
+    } catch {
+      return resolved;
+    }
+  }
+  return resolveProjectRootFor(deps);
+}
+
+async function cmdTrust(rest: string[], io: CliIo, deps: CliDeps, remove: boolean): Promise<number> {
+  const target = await trustTargetOf(rest, deps);
+  const dshHome = dshHomeOf(deps);
+  const { mkdir } = await import("node:fs/promises");
+  try {
+    await mkdir(dshHome, { recursive: true });
+    const file = trustFileIn(dshHome);
+    const projects = remove ? await removeTrustedProject(file, target) : await addTrustedProject(file, target);
+    io.out(`${remove ? "已移除信任" : "已信任"}项目 ${target}`);
+    io.out(`信任清单 ${file}（${projects.length} 项${projects.length > 0 ? "：" + projects.join("、") : ""}）`);
+    io.out(remove ? "运行中的 dsh 会话会经文件监听自动卸载该项目层行。" : "运行中的 dsh 会话会经文件监听自动装载该项目层行（其它条件不变时）。");
+    return 0;
+  } catch (error) {
+    return fail(io, error instanceof Error ? error.message : String(error));
+  }
+}
+
 async function cmdImport(parsed: ParsedArgs, rest: string[], io: CliIo, deps: CliDeps): Promise<number> {
   if (rest.length > 0) return fail(io, "import 不接受位置参数（用法：dsh-mcp import --from <file|-> …）");
   if (parsed.from === undefined) return fail(io, "用法：dsh-mcp import --from <file|-> [--scope project|user|profile] [--format yml|json] [--dry-run] [--overwrite]");
@@ -1084,8 +1121,12 @@ export async function runCli(argv: string[], io: CliIo, deps: CliDeps = {}): Pro
       return cmdStatus(parsed, io, deps);
     case "import":
       return cmdImport(parsed, rest, io, deps);
+    case "trust":
+      return cmdTrust(rest, io, deps, false);
+    case "untrust":
+      return cmdTrust(rest, io, deps, true);
     default:
-      return fail(io, `未知子命令：${command}（支持 add|list|get|remove|status|import，dsh-mcp --help 查看用法）`);
+      return fail(io, `未知子命令：${command}（支持 add|list|get|remove|status|import|trust|untrust，dsh-mcp --help 查看用法）`);
   }
 }
 

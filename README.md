@@ -14,6 +14,15 @@ transports + six-layer source governance + per-session isolation.
 **Transport types are decided by the official client**; this plugin does not
 implement MCP transports.
 
+**Security posture** (fork hardening): project-layer files ship with the
+repository, so (1) they are **not auto-mounted until the project root is
+registered** — `dsh-mcp trust` writes `<dshHome>/mcp-trusted.json`
+(`DSH_MCP_TRUST_ALL=1` opts out); (2) the legacy `.mcp.json` layer is **off by
+default** (`DSH_MCP_ENABLE_MCP_JSON=1` opts in); (3) credential-suffixed
+`${VAR}` references (`*TOKEN`, `*API_KEY`, …) are **not expanded** unless
+whitelisted via `DSH_MCP_EXPAND_ALLOW`; (4) MCP endpoint URLs must be
+`http:`/`https:`.
+
 If this plugin is useful, a GitHub
 [star](https://github.com/wldxiaobai/dsh-project-mcp-manager) is appreciated.
 Bugs, host mismatches, or ideas belong in

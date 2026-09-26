@@ -597,6 +597,27 @@ try {
       await rm(importDir, { recursive: true, force: true });
     }
   }
+  // 22. trust / untrust：写 <home>/.dsh/mcp-trusted.json（deps.home 注入），幂等
+  {
+    const trustFile = join(home, ".dsh", "mcp-trusted.json");
+    const cap = io();
+    assert.equal(await runCli(["trust"], cap.io, deps), 0);
+    assert.ok(cap.lines.join("\n").includes("已信任项目"), "trust reports the registered root");
+    assert.ok(JSON.parse(await readFile(trustFile, "utf8")).includes(project), "trust writes the project root");
+    const capAgain = io();
+    assert.equal(await runCli(["trust"], capAgain.io, deps), 0);
+    assert.equal(JSON.parse(await readFile(trustFile, "utf8")).length, 1, "trust is idempotent");
+    const capPath = io();
+    assert.equal(await runCli(["trust", "/tmp/some-explicit-root"], capPath.io, deps), 0);
+    assert.ok(JSON.parse(await readFile(trustFile, "utf8")).some((item) => item.endsWith("some-explicit-root")), "explicit path argument is honoured");
+    const capUn = io();
+    assert.equal(await runCli(["untrust", "/tmp/some-explicit-root"], capUn.io, deps), 0);
+    assert.equal(JSON.parse(await readFile(trustFile, "utf8")).length, 1, "untrust removes only the named root");
+    const capUn2 = io();
+    assert.equal(await runCli(["untrust"], capUn2.io, deps), 0);
+    assert.equal(JSON.parse(await readFile(trustFile, "utf8")).length, 0, "untrust defaults to the current project root");
+    pass("dsh-mcp trust/untrust manage <dshHome>/mcp-trusted.json idempotently");
+  }
 } finally {
   await rm(dir, { recursive: true, force: true });
 }

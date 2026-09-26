@@ -65,6 +65,7 @@ import {
   type SourcedRow
 } from "./json-file.js";
 import { findProjectRoot } from "./project-root.js";
+import { isProjectTrusted, readTrustedProjects, trustAllEnabled, trustFileIn, TRUST_FILE } from "./trust.js";
 import {
   byCodeUnit,
   deniedToolsForFilter,
@@ -205,6 +206,9 @@ export interface ProjectMcpRegistryOptions {
   toolBudget?: { maxTools: number; maxBytes: number };
   /** 无会话后卸载宽限（毫秒）；缺省 `UNMOUNT_GRACE_MS`（5 分钟）。测试注入。 */
   unmountGraceMs?: number;
+  /** 项目层信任清单路径（测试注入）；缺省 `<dshHome>/mcp-trusted.json`。
+   *  信任门语义见 trust.ts；`DSH_MCP_TRUST_ALL=1` 恒开（全部视同信任）。 */
+  trustFile?: string;
 }
 
 interface ProjectEntry {
@@ -785,6 +789,8 @@ export class ProjectMcpRegistry {
   private readonly toolBudgetHits = new Map<string, { name: string; tools: number; bytes: number }[]>();
   /** 项目离开活跃挂载集的时刻（宽限内仍保持装载）。 */
   private readonly idleSince = new Map<string, number>();
+  /** 最近一轮读到的项目层信任清单（projectKey 比较用，见 isProjectTrusted）。 */
+  private trustedProjects: string[] = [];
 
   constructor(ctx: any, providers: ProjectMcpRegistryOptions) {
     this.ctx = ctx;
@@ -1107,11 +1113,14 @@ export class ProjectMcpRegistry {
   private async syncUserWatcher(): Promise<void> {
     const paths = this.resolveUserLayerPaths();
     const foreignPath = foreignUserMcpJsonFile(dirname(paths.mcpJson));
+    const trustPath = this.trustFilePath();
     const targets = [
       paths.mcpYml,
       paths.mcpJson,
       ...(this.userLayer.profileJson === null ? [] : [this.userLayer.profileJson]),
-      ...(isSameFilePath(foreignPath, paths.mcpJson) ? [] : [foreignPath])
+      ...(isSameFilePath(foreignPath, paths.mcpJson) ? [] : [foreignPath]),
+      // 信任清单变更也要热生效：dsh-mcp trust/untrust 后无需等待下一次文件事件。
+      trustPath
     ];
     // 排序只用于跨轮次相等性比较，须与 locale 无关保持稳定：统一走 byCodeUnit
     // （UTF-16 码元序，与 Array#sort 默认逐字节等价，不经 locale collator），
@@ -1143,6 +1152,11 @@ export class ProjectMcpRegistry {
       // 保持监听；错误不炸宿主
     });
     this.userWatcher = watcher;
+  }
+
+  /** 信任清单路径：缺省 dshHome 根（与用户层 mcp.yml 同目录），测试可注入。 */
+  private trustFilePath(): string {
+    return this.providers.trustFile ?? trustFileIn(dirname(this.resolveUserLayerPaths().mcpYml));
   }
 
   private noteConfigRead(): void {
@@ -1298,6 +1312,7 @@ export class ProjectMcpRegistry {
     if (this.disposed) return;
     this.reconcileCount++;
     const roots = await this.knownProjects();
+    this.trustedProjects = await readTrustedProjects(this.trustFilePath());
     const hostGlobalNames = await this.providers.globalNames().catch(() => []);
     const { skip: skipReread, signature } = await this.shouldSkipConfigReread(roots, hostGlobalNames);
     if (!skipReread) {
@@ -1515,6 +1530,16 @@ export class ProjectMcpRegistry {
   }
 
   private async reconcileProject(key: string, entry: { projectRoot: string; rows: DesiredProjectRow[] }, keepMounts: boolean) {
+    // 信任门在对账层而不只在装载层：撤销信任（dsh-mcp untrust / 清单改动）必须
+    // 拆掉已挂连接，而不是只挡住新装载。未信任项目 desired 置空，与 idle 同路径。
+    const trusted = trustAllEnabled() || isProjectTrusted(this.trustedProjects, key);
+    if (!trusted) {
+      this.warnGated("untrusted\u0000" + key, entry.projectRoot, () => {
+        this.ctx.logger.warn(`项目 MCP（${entry.projectRoot}）未登记信任：项目层 MCP 行全部跳过（登记：dsh-mcp trust ${entry.projectRoot}；或设 DSH_MCP_TRUST_ALL=1 关闭信任门）`);
+      });
+    } else {
+      this.warnGated("untrusted\u0000" + key, "", () => {});
+    }
     let project = this.projects.get(key);
     if (project === undefined) {
       // 只为「确实有行要装载」的项目建条目：否则会话/进程访问过的每个目录都会
@@ -1525,13 +1550,21 @@ export class ProjectMcpRegistry {
       this.projects.set(key, project);
     }
     const catalog = entry.rows;
-    const desired = keepMounts ? catalog : [];
+    const desired = keepMounts && trusted ? catalog : [];
     await this.reconcileContainer(this.projectContainer(key, project), desired, new Set(), catalog);
-    if (!keepMounts) {
+    if (!keepMounts || !trusted) {
       for (const item of catalog) {
         if (project.servers.has(item.rawName)) continue;
         const markKey = key + "\u0000" + item.rawName;
-        if (!this.skipReasons.has(markKey)) this.skipReasons.set(markKey, "idle");
+        if (!trusted) {
+          // 未信任是当前唯一事实：覆盖更早的装载性标记（env-missing 等）。
+          this.skipReasons.set(markKey, "untrusted");
+          continue;
+        }
+        // idle：保留更早的装载性标记（env-missing / config-invalid …），
+        // 只把缺省标记与失效的 untrusted 归为 idle。
+        const existing = this.skipReasons.get(markKey);
+        if (existing === undefined || existing === "untrusted") this.skipReasons.set(markKey, "idle");
       }
     }
   }
@@ -1759,6 +1792,15 @@ export class ProjectMcpRegistry {
   /** 装载一个期望行；返回跳过原因（有则不建装载实例），undefined = 已发起装载。 */
   private async mountServer(container: MountContainer, item: DesiredProjectRow): Promise<string | undefined> {
     if (this.disposed) return undefined;
+    // 项目层信任门：项目根未登记（<dshHome>/mcp-trusted.json）且未设
+    // DSH_MCP_TRUST_ALL=1 时，项目层行一律不装载。全局层（用户层文件在
+    // 用户自己的 dshHome 内）不设门。告警与诊断按项目门控一次，不逐行刷屏。
+    if (container.scope === "project" && !trustAllEnabled() && !isProjectTrusted(this.trustedProjects, container.key)) {
+      this.warnGated("untrusted\u0000" + container.key, container.projectRoot, () => {
+        this.ctx.logger.warn(`${container.label} 未登记信任：项目层 MCP 行全部跳过（登记：dsh-mcp trust ${container.projectRoot}；或设 DSH_MCP_TRUST_ALL=1 关闭信任门）`);
+      });
+      return "untrusted";
+    }
     const effectiveName = container.effectiveNameOf(item.rawName);
     if (effectiveName === undefined) return undefined;
     await container.diag({ kind: "attempt", rawName: item.rawName, effectiveName });

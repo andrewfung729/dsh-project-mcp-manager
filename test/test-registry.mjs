@@ -7,6 +7,7 @@ import { bindProjectMcpService, PROJECT_MCP_SERVICE } from "../lib/service.js";
 import { apply } from "../lib/index.js";
 import { MCP_BLOCK_BEGIN, MCP_BLOCK_END, writeManagedRows } from "../lib/mcp-file.js";
 import { byCodeUnit } from "../lib/model.js";
+import { addTrustedProject, removeTrustedProject } from "../lib/trust.js";
 
 let passed = 0;
 function pass(name) {
@@ -145,6 +146,9 @@ const dir = await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager
 // 本套断言针对「层开着」的行为：恢复旧默认（遗留 .mcp.json 层现默认关闭，
 // 见 json-file.mcpJsonLayerEnabled）；开关语义另见 case 26 与 test-json-file 真值表。
 process.env.DSH_MCP_ENABLE_MCP_JSON = "1";
+// 信任门默认启用（见 trust.ts）：本套既有断言假设「项目层行直接装载」，
+// 恢复旧行为；门的阻断语义另见 case 27b。
+process.env.DSH_MCP_TRUST_ALL = "1";
 
 // ── profile 名解析（纯函数，宿主内部路径形态）──────────────────────────────
 {
@@ -730,13 +734,68 @@ try {
           const cleanup = disposer();
           if (typeof cleanup === "function") cleanup();
         }
-        pass("credential-suffixed ${VAR} refs are blocked by default and allowed via DSH_MCP_EXPAND_ALLOW");
+    pass("credential-suffixed ${VAR} refs are blocked by default and allowed via DSH_MCP_EXPAND_ALLOW");
       } finally {
         process.chdir(savedCwdBlk);
         delete process.env.CC_BLK_TOKEN;
         delete process.env.CC_BLK_PLAIN;
         delete process.env.DSH_MCP_EXPAND_ALLOW;
         await rmRetry(dirBlk);
+      }
+    }
+
+    // 27b. 项目层信任门：未登记 → 项目行全部 untrusted 跳过；登记后（清单文件
+    // 变更，无项目文件事件）下一轮对账即装载；TRUST_ALL=1 全放行。
+    {
+      const dirTr = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-trust-")));
+      const homeTr = join(dirTr, "home");
+      const trustFile = join(homeTr, "mcp-trusted.json");
+      const savedTrustAll = process.env.DSH_MCP_TRUST_ALL;
+      const savedCwdTr = process.cwd();
+      try {
+        await mkdir(join(homeTr, "profiles"), { recursive: true });
+        process.chdir(dirTr);
+        delete process.env.DSH_MCP_TRUST_ALL;
+        await writeManagedRows(projectMcpFile(dirTr), [stdioRow("gated")], { createIfMissing: true });
+        const ctxTr = fakeCtx();
+        const registryTr = new ProjectMcpRegistry(ctxTr, {
+          globalNames: async () => [],
+          userLayerPaths: { mcpYml: join(homeTr, "mcp.yml"), mcpJson: join(homeTr, "mcp.json"), profilesDir: join(homeTr, "profiles") },
+          trustFile
+        });
+        ctxTr.agentsList.push(fakeAgent("session-tr", dirTr));
+        await registryTr.reconcileNow();
+        assert.equal(ctxTr.mounts.filter((config) => config.serverName === "gated").length, 0, "untrusted project rows never mount");
+        const viewTr = (await registryTr.serverView(dirTr, "gated"));
+        assert.equal(viewTr.skipReason, "untrusted", "snapshot exposes the untrusted skip reason");
+        // 未信任项目的 summary 也应把行记为 untrusted 跳过
+        const summaryTr = await readDiagSummary(dirTr);
+        assert.equal(summaryTr.skippedByReason["untrusted"], 1, "summary counts untrusted skips: " + JSON.stringify(summaryTr));
+
+        // 登记（dsh-mcp trust 写同一文件）后，无需项目文件事件，下一轮对账即装载
+        await addTrustedProject(trustFile, dirTr);
+        await registryTr.reconcileNow();
+        assert.ok(await registryTr.waitForState(dirTr, "gated", (state) => state?.phase === "active", 5000), "trusted project rows mount on the next reconcile");
+
+        // 移除信任 → 重新阻断（行仍在目录里，卸载）
+        await removeTrustedProject(trustFile, dirTr);
+        await registryTr.reconcileNow();
+        assert.equal(ctxTr.mounts.filter((config) => config.serverName === "gated" && ctxTr.disposals.includes("gated")).length >= 0, true, "unmount recorded");
+        assert.ok(await registryTr.waitForState(dirTr, "gated", (state) => state === undefined, 5000), "untrusted again: row unloaded");
+
+        process.env.DSH_MCP_TRUST_ALL = "1";
+        await registryTr.reconcileNow();
+        assert.ok(await registryTr.waitForState(dirTr, "gated", (state) => state?.phase === "active", 5000), "TRUST_ALL bypasses the gate");
+        for (const disposer of ctxTr.disposers) {
+          const cleanup = disposer();
+          if (typeof cleanup === "function") cleanup();
+        }
+        pass("project-layer trust gate blocks, admits on trust-file change, and honours TRUST_ALL");
+      } finally {
+        process.chdir(savedCwdTr);
+        if (savedTrustAll === undefined) delete process.env.DSH_MCP_TRUST_ALL;
+        else process.env.DSH_MCP_TRUST_ALL = savedTrustAll;
+        await rmRetry(dirTr);
       }
     }
 

@@ -57,6 +57,14 @@
 项目层同名行与用户层行撞名时，项目行按生效名规则改为 `p<hash>_<名>`，全局行保持
 原名；该项目的会话同时 deny 掉全局那条的工具（项目侧压制）。
 
+## 项目信任门
+
+项目层行（`.dsh/mcp.yml`、`.dsh/mcp.json`、遗留 `.mcp.json`）只在项目根已
+登记进 `<dshHome>/mcp-trusted.json` 时装载（`dsh-mcp trust [<路径>]`；
+`dsh-mcp untrust` 移除）。未信任项目按 `untrusted` 原因跳过全部项目层行——
+已挂载的行也会在下一轮对账中卸载。`DSH_MCP_TRUST_ALL=1` 整体关闭信任门。
+用户层行不受影响（文件在用户自己的 dshHome 内）。
+
 ## 遗留 Claude Code 层（只读）
 
 - `<projectRoot>/.mcp.json`（层 3，低优先级）**默认关闭**：该文件随仓库分发，

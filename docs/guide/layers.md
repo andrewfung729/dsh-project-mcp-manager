@@ -78,6 +78,16 @@ project row is renamed to `p<hash>_<name>` per the effective-name rules while
 the global row keeps its original name; that project's sessions also deny the
 global row's tools (project-side suppression).
 
+## Project trust gate
+
+Project-layer rows (`.dsh/mcp.yml`, `.dsh/mcp.json`, and the legacy
+`.mcp.json`) mount only when the project root is registered in
+`<dshHome>/mcp-trusted.json` (`dsh-mcp trust [<path>]`; `dsh-mcp untrust`
+removes). Untrusted projects skip every project-layer row with the
+`untrusted` skip reason — including already-mounted rows, which are unmounted
+on the next reconcile. `DSH_MCP_TRUST_ALL=1` disables the gate entirely.
+User-layer rows are unaffected (they live in the user's own dshHome).
+
 ## Legacy Claude Code layer (read-only)
 
 - `<projectRoot>/.mcp.json` (layer 3, lowest project priority) is **off by
