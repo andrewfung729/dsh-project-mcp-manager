@@ -18,14 +18,16 @@ export const SERVER_NAME_RE = /^[A-Za-z0-9_-]{1,32}$/;
  */
 const EMBEDDED_ENV_REF_RE = /\$\{([A-Za-z_]\w*)\}/g;
 
-/** url 字段允许合法 URL 或含 `${VAR}` 占位的串（整值与串内插值同待）：装载前
- * 一律放行占位串，展开后的真实合法性由 mount 复验兜底（env-invalid 诊断）。 */
+/** url 字段允许 http/https URL 或含 `${VAR}` 占位的串（整值与串内插值同待）：
+ * 装载前一律放行占位串，展开后的真实合法性由 mount 复验兜底（env-invalid 诊断）。
+ * 具体 URL 只收 `http:`/`https:`——`file:`、`data:` 等 scheme 经 new URL 可解析，
+ * 但 MCP 端点语义不成立，且会借传输层触达本地文件与内网（SSRF 面）。 */
 export function isUrlOrEnvRef(value: string): boolean {
   EMBEDDED_ENV_REF_RE.lastIndex = 0;
   if (EMBEDDED_ENV_REF_RE.test(value)) return true;
   try {
-    new URL(value);
-    return true;
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
   } catch {
     return false;
   }

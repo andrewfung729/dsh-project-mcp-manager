@@ -71,6 +71,11 @@ pass("streamable-http input parses and maps headers");
 expectThrow("bad serverName rejected", () => mcpServerInputSchema.parse({ serverName: "bad/name", transport: "stdio", command: "npx" }), /serverName/);
 expectThrow("missing command rejected", () => mcpServerInputSchema.parse({ serverName: "ok", transport: "stdio" }));
 expectThrow("bad url rejected", () => mcpServerInputSchema.parse({ serverName: "ok", transport: "streamable-http", url: "not-url" }));
+expectThrow("file url rejected", () => mcpServerInputSchema.parse({ serverName: "ok", transport: "streamable-http", url: "file:///etc/passwd" }));
+expectThrow("data url rejected", () => mcpServerInputSchema.parse({ serverName: "ok", transport: "streamable-http", url: "data:text/plain,hi" }));
+assert.ok(mcpServerInputSchema.safeParse({ serverName: "ok", transport: "streamable-http", url: "https://example/mcp" }).success, "https url accepted");
+assert.ok(mcpServerInputSchema.safeParse({ serverName: "ok", transport: "streamable-http", url: "http://127.0.0.1:3333/mcp" }).success, "http url accepted");
+pass("url scheme allowlist: only http/https parse as concrete urls");
 
 // 4. row id mapping
 assert.equal(rowIdForServerName("github"), "panel-mcp-github");
