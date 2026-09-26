@@ -6,6 +6,9 @@ import { runCli } from "../lib/cli.js";
 import { projectMcpFile } from "../lib/registry.js";
 import { writeManagedRows } from "../lib/mcp-file.js";
 
+// 恢复遗留 .mcp.json 层的旧默认（现默认关闭）：本文件断言层开启态的行为。
+process.env.DSH_MCP_ENABLE_MCP_JSON = "1";
+
 let passed = 0;
 function pass(name) {
   passed += 1;
@@ -211,7 +214,7 @@ try {
     pass("cli resolves project root through real findProjectRoot (git hit and cwd fallback)");
   }
 
-  // 13. DSH_MCP_IGNORE_MCP_JSON=1：list 失去项目 .mcp.json 层，get 对只存在于
+  // 13. IGNORE_MCP_JSON=1（优先于顶部 ENABLE=1）：list 失去项目 .mcp.json 层，get 对只存在于
   // 该层的名字指明停用开关；原生 yml 层不受牵连。
   {
     process.env.DSH_MCP_IGNORE_MCP_JSON = "1";

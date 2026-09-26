@@ -56,10 +56,20 @@ export function detectForeignMcpFormat(value: Record<string, unknown>, fileName?
 export const CC_PROJECT_FILE = ".mcp.json";
 /** 置为 "1" 时跳过遗留 `<projectRoot>/.mcp.json` 的读取与监听；DSH 自有 JSON 层不受影响。 */
 export const IGNORE_MCP_JSON_ENV = "DSH_MCP_IGNORE_MCP_JSON";
+/** 置为 "1" 时启用遗留 `<projectRoot>/.mcp.json` 层（默认关闭，见 mcpJsonLayerEnabled）。 */
+export const ENABLE_MCP_JSON_ENV = "DSH_MCP_ENABLE_MCP_JSON";
 
-/** 遗留 CC 项目层是否启用：默认开，`DSH_MCP_IGNORE_MCP_JSON=1` 关。 */
+/**
+ * 遗留 CC 项目层是否启用：**默认关**，`DSH_MCP_ENABLE_MCP_JSON=1` 显式打开；
+ * `DSH_MCP_IGNORE_MCP_JSON=1` 恒为关闭（显式拒绝优先于显式启用）。
+ *
+ * 该文件随仓库分发（克隆即得），等价于「仓库作者替你决定 spawn 哪些进程」。
+ * Claude Code 自身对 project scope .mcp.json 要求逐个用户批准；无确认门的
+ * 自动装载把「克隆恶意仓库 + 打开会话」变成任意代码执行，故默认不装载。
+ */
 export function mcpJsonLayerEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env[IGNORE_MCP_JSON_ENV] !== "1";
+  if (env[IGNORE_MCP_JSON_ENV] === "1") return false;
+  return env[ENABLE_MCP_JSON_ENV] === "1";
 }
 
 /**

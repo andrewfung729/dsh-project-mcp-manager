@@ -19,7 +19,7 @@ import { pathToFileURL } from "node:url";
 import { mkdir, readdir, readFile } from "node:fs/promises";
 import { extractManagedRows, readPatchFile, updateManagedRows, type PatchRow } from "./mcp-file.js";
 import { byCodeUnit, inputFromPatchRow, mcpServerInputSchema, parseCliTransport, patchRowToView, rowNameOf, toPatchRow, type McpServerInput } from "./model.js";
-import { CC_PROJECT_FILE, FOREIGN_MCP_FORMAT_HINT, IGNORE_MCP_JSON_ENV, JSON_MCP_FILE, mcpJsonLayerEnabled, parseJsonServersValue, readDshJsonFile, readMcpJsonFile, type JsonReadResult, type McpRowSource, type SourcedRow } from "./json-file.js";
+import { CC_PROJECT_FILE, ENABLE_MCP_JSON_ENV, FOREIGN_MCP_FORMAT_HINT, IGNORE_MCP_JSON_ENV, JSON_MCP_FILE, mcpJsonLayerEnabled, parseJsonServersValue, readDshJsonFile, readMcpJsonFile, type JsonReadResult, type McpRowSource, type SourcedRow } from "./json-file.js";
 import { MCP_YML_FILE, DIAG_FILE, dshHomeFor, profileMcpJsonFile, userLayerPathsIn } from "./dsh-paths.js";
 import { readJsonServers, toJsonEntry, updateJsonServers } from "./json-write.js";
 import { mergeSourcedRows, parseDiagDocument, projectDshJsonFile, projectMcpFile, projectMcpJsonFile, type DiagDocument, type DiagSummary, type IdentityShadow } from "./registry.js";
@@ -315,7 +315,7 @@ async function collectLayers(deps: CliDeps): Promise<LayerRows[]> {
     await readNativeLayer(projectMcpFile(projectRoot), "dsh-project"),
     await readJsonLayer(projectDshJsonFile(projectRoot), "dsh-project-json", "project", projectRoot)
   );
-  // 3) 项目 .mcp.json（遗留只读层；DSH_MCP_IGNORE_MCP_JSON=1 关闭后整层不出现）
+  // 3) 项目 .mcp.json（遗留只读层，默认关闭；ENABLE_MCP_JSON=1 打开后整层出现，IGNORE=1 恒关）
   if (mcpJsonLayerEnabled()) {
     const ccPath = projectMcpJsonFile(projectRoot);
     const cc = await readMcpJsonFile(ccPath, projectRoot);
@@ -616,7 +616,7 @@ function printServerDetails(hit: { name: string; row: PatchRow; layer: LayerRows
 /** 未命中提示：已查层由 collectLayers 的实际结果拼出（六层，不是写死的三层）。 */
 function getMissMessage(name: string, layers: LayerRows[]): string {
   const offNotes: string[] = [];
-  if (!mcpJsonLayerEnabled()) offNotes.push(`${CC_PROJECT_FILE} 层已停用（${IGNORE_MCP_JSON_ENV}=1）`);
+  if (!mcpJsonLayerEnabled()) offNotes.push(`${CC_PROJECT_FILE} 层未启用（默认关闭；设 ${ENABLE_MCP_JSON_ENV}=1 启用，${IGNORE_MCP_JSON_ENV}=1 恒为关闭）`);
   const tail = offNotes.length > 0 ? "；" + offNotes.join("；") : "";
   return `未找到服务器 "${name}"（已查 ${layers.map((layer) => layer.path).join("、")}${tail}）`;
 }

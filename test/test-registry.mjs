@@ -140,7 +140,11 @@ function fakeAgent(id, cwd) {
 
 // 项目根一律取物理路径：与 findProjectRoot 的 realpath 归一同口径（macOS 的
 // /var → /private/var 符号链接会让词法/物理写法键控出两个项目）。
-const dir = await realpath(await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-registry-"))));
+const dir = await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-registry-")));
+
+// 本套断言针对「层开着」的行为：恢复旧默认（遗留 .mcp.json 层现默认关闭，
+// 见 json-file.mcpJsonLayerEnabled）；开关语义另见 case 26 与 test-json-file 真值表。
+process.env.DSH_MCP_ENABLE_MCP_JSON = "1";
 
 // ── profile 名解析（纯函数，宿主内部路径形态）──────────────────────────────
 {
@@ -390,10 +394,10 @@ try {
   pass("registry cleanup disposes watcher and mounted fibers");
 
   // ── 10+. 遗留 CC 项目层：.mcp.json / 影子优先 / ${VAR} ──────────────────
-  const dir2 = await realpath(await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-cc-"))));
+  const dir2 = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-cc-")));
   // fake home 必须落在项目树之外（与任何项目根无祖先关系）：用户层热重载只能
   // 由用户 watcher 证明，不许借项目 watcher 的 depth 覆盖冒充。
-  const home2 = await realpath(await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-cc-home-"))));
+  const home2 = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-cc-home-")));
   await mkdir(join(home2, ".dsh"), { recursive: true });
   const savedBin = process.env.CC_TEST_BIN;
   const savedMissing = process.env.CC_TEST_MISSING;
@@ -655,7 +659,7 @@ try {
     assert.ok(diag24.some((row) => row.kind === "scan" && row.ok === false && String(row.error).includes("ENOENT")), "deleting a live yml file still records a scan error");
     pass("absent project yml stays silent for user-layer-only mounts and stays loud for removed live yml files");
 
-    // 26. .mcp.json 可关：IGNORE_MCP_JSON=1 → 该层不读不看、分区消失、已装
+    // 26. .mcp.json 可关（IGNORE 恒关，优先于顶部 ENABLE=1）：该层不读不看、分区消失、已装
     // cc-project fiber 被卸；yml 源不受牵连。撤开关后恢复。
     process.env.DSH_MCP_IGNORE_MCP_JSON = "1";
     try {
@@ -845,7 +849,7 @@ try {
     //（此前硬编码 homedir()/.dsh，重定位后用户层整体静默失效——缺文件是合法零配置，不报错）。
     {
       const savedHome = process.env.DSH_HOME;
-      const relocated = await realpath(await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-dshhome-"))));
+      const relocated = await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-dshhome-")));
       try {
         process.env.DSH_HOME = relocated;
         await writeFile(join(relocated, "mcp.json"), JSON.stringify({
@@ -887,7 +891,7 @@ try {
     //  a) 用户层 disabled 占名行 + 项目同名行 → 该项目不得 deny 自己的工具；
     //  b) 宿主 patch 占名 + 用户层同名行被拒（name-taken）+ 项目同名行 → 不得 deny 宿主 patch 的工具。
     {
-      const home32 = await realpath(await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-h1-"))));
+      const home32 = await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-h1-")));
       const proj32 = join(dir2, "proj32");
       try {
         await mkdir(proj32, { recursive: true });
@@ -942,7 +946,7 @@ try {
     // 33. 纯用户层内部冲突按全局归因（M3/M4）：零配置项目不写 .mcp-diag.json，
     // 同名/同服务遮蔽只在全局层告警一次并写全局诊断。
     {
-      const home33 = await realpath(await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-m4-"))));
+      const home33 = await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-m4-")));
       const proj33 = join(dir2, "proj33");
       try {
         await mkdir(proj33, { recursive: true });
@@ -996,7 +1000,7 @@ try {
     // 34. 告警变更门控（M1/M2）：持续存在的坏条目与持续被拒的 name-taken 行，
     // 多次对账只在集合变化时各告警一次（此前每次文件事件都重刷）。
     {
-      const home34 = await realpath(await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-gate-"))));
+      const home34 = await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-gate-")));
       const proj34 = join(dir2, "proj34");
       try {
         await mkdir(join(proj34, ".dsh"), { recursive: true });
@@ -1047,7 +1051,7 @@ try {
     // 35. profile 名校验（M10）：DSH_MCP_PROFILE 是外部输入，`../..` 之类不得被
     // join 进 profiles 目录读到目录外的文件；不合法按「解析不出」降级并告警一次。
     {
-      const home35 = await realpath(await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-profile-"))));
+      const home35 = await realpath(await mkdtemp(join(tmpdir(), "dsh-project-mcp-manager-profile-")));
       const proj35 = join(dir2, "proj35");
       try {
         await mkdir(proj35, { recursive: true });

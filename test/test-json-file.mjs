@@ -245,8 +245,9 @@ try {
 }
 
 // 7. 共存边界开关谓词真值表（纯函数，传入合成 env，不碰 process.env）
-assert.equal(mcpJsonLayerEnabled({}), true, "legacy .mcp.json layer on by default");
-assert.equal(mcpJsonLayerEnabled({ DSH_MCP_IGNORE_MCP_JSON: "1" }), false, "IGNORE_MCP_JSON closes it");
+assert.equal(mcpJsonLayerEnabled({}), false, "legacy .mcp.json layer off by default");
+assert.equal(mcpJsonLayerEnabled({ DSH_MCP_ENABLE_MCP_JSON: "1" }), true, "ENABLE_MCP_JSON opens it");
+assert.equal(mcpJsonLayerEnabled({ DSH_MCP_ENABLE_MCP_JSON: "1", DSH_MCP_IGNORE_MCP_JSON: "1" }), false, "IGNORE_MCP_JSON wins over ENABLE");
 pass("legacy project .mcp.json switch follows the documented truth table");
 
 // 8. 不再读取任何 Claude 用户态文件：编译产物里不得出现该路径

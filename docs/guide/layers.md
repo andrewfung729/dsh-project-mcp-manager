@@ -80,9 +80,12 @@ global row's tools (project-side suppression).
 
 ## Legacy Claude Code layer (read-only)
 
-- `<projectRoot>/.mcp.json` is still read (layer 3, lowest project priority),
-  so CC users need not migrate; `DSH_MCP_IGNORE_MCP_JSON=1` disables the whole
-  layer.
+- `<projectRoot>/.mcp.json` (layer 3, lowest project priority) is **off by
+  default**: the file ships with the repository, so auto-mounting it without a
+  consent gate turns "clone a malicious repo + open a session" into arbitrary
+  code execution (Claude Code itself prompts per server for this scope). Set
+  `DSH_MCP_ENABLE_MCP_JSON=1` to opt in; `DSH_MCP_IGNORE_MCP_JSON=1` always
+  wins over the enable flag.
 - `~/.claude.json` is **no longer read** (as of v0.4.0): it is Claude's
   user-state monolith, mixing credentials with project history. Migrate its
   servers to `~/.dsh/mcp.json` or `~/.dsh/profiles/<name>/mcp.json`. The old

@@ -59,8 +59,10 @@
 
 ## 遗留 Claude Code 层（只读）
 
-- `<projectRoot>/.mcp.json` 仍被读取（层 3，低优先级），CC 用户无需迁移；设
-  `DSH_MCP_IGNORE_MCP_JSON=1` 可整层停用。
+- `<projectRoot>/.mcp.json`（层 3，低优先级）**默认关闭**：该文件随仓库分发，
+  无确认门的自动装载会把「克隆恶意仓库 + 打开会话」变成任意代码执行
+  （Claude Code 自身对该 scope 要求逐个批准）。设 `DSH_MCP_ENABLE_MCP_JSON=1`
+  显式启用；`DSH_MCP_IGNORE_MCP_JSON=1` 恒为关闭（优先于启用）。
 - `~/.claude.json` **不再读取**（v0.4.0 起）：那是 Claude 的用户态单体文件，混存
   凭据与项目历史。请把其中的服务器迁移到 `~/.dsh/mcp.json` 或
   `~/.dsh/profiles/<name>/mcp.json`。旧开关 `DSH_MCP_READ_CLAUDE_USER` 与
