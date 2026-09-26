@@ -444,7 +444,31 @@ function envRefNames(value: string): string[] {
 
 export type ExpandEnvRefsResult =
   | { ok: true; input: McpServerInput }
-  | { ok: false; missingVar: string };
+  | { ok: false; missingVar: string; blockedVar?: undefined }
+  | { ok: false; missingVar?: undefined; blockedVar: string };
+
+/** `DSH_MCP_EXPAND_ALLOW`：逗号分隔的变量白名单。设置后只有名单内的变量可被
+ * `${VAR}` 引用（其余一律 blocked，包括非凭证名）；未设置时按凭证后缀黑名单
+ * 遮蔽（见 EXPAND_BLOCKED_VAR_RE）。 */
+export const EXPAND_ALLOW_ENV = "DSH_MCP_EXPAND_ALLOW";
+
+/**
+ * 默认遮蔽的凭证类变量名（后缀锚定）：项目内配置文件随仓库分发，`Bearer
+ * ${GITHUB_TOKEN}` 这类写法会把宿主任意环境变量经 spawn 的 env 或 http 头
+ * 交给仓库作者控制的进程/端点。显式列入 `DSH_MCP_EXPAND_ALLOW` 可放行。
+ */
+const EXPAND_BLOCKED_VAR_RE = /(API_?KEY|TOKEN|SECRET|PASSWO?RD|CREDENTIALS?|PRIVATE_?KEY)$/i;
+
+/** 变量是否允许被 `${VAR}` 引用展开。白名单（设置 DSH_MCP_EXPAND_ALLOW 时）
+ * 优先于凭证黑名单。 */
+export function isEnvRefAllowed(name: string, env: NodeJS.ProcessEnv): boolean {
+  const allow = env[EXPAND_ALLOW_ENV];
+  if (typeof allow === "string" && allow.trim() !== "") {
+    const list = allow.split(",").map((item) => item.trim()).filter((item) => item !== "");
+    return list.includes(name);
+  }
+  return !EXPAND_BLOCKED_VAR_RE.test(name);
+}
 
 function expandSecretMap(
   map: Record<string, string | null> | undefined,
@@ -460,8 +484,9 @@ function expandSecretMap(
  * 运行时展开 command、args[*]、env/headers 值、url、cwd 中的 `${VAR}` 引用，
  * 支持串内插值（`Bearer ${TOKEN}` 与整值 `${TOKEN}` 都会展开），对齐 CC 的
  * 写法习惯。纯函数：环境经参数注入（宿主传 process.env），便于测试。
- * 任一被引用的变量缺失或为空串即整体失败（ok:false + 变量名，调用方据此
- * 跳过该条目装载）——空 token 与缺失同样危险，宁可 spawn 前拒绝。诊断
+ * 任一被引用的变量缺失或为空串即整体失败（missingVar）；被凭证黑名单遮蔽
+ * 或不在 `DSH_MCP_EXPAND_ALLOW` 白名单内同样整体失败（blockedVar）——调用方
+ * 据此跳过该条目装载。空 token 与缺失同样危险，宁可 spawn 前拒绝。诊断
  * 消息只含变量名不含值。`$VAR` 裸形与 `${9bad}` 非法名保持字面量。
  */
 export function expandEnvRefs(input: McpServerInput, env: NodeJS.ProcessEnv): ExpandEnvRefsResult {
@@ -475,6 +500,7 @@ export function expandEnvRefs(input: McpServerInput, env: NodeJS.ProcessEnv): Ex
   }
   for (const value of strings) {
     for (const name of envRefNames(value)) {
+      if (!isEnvRefAllowed(name, env)) return { ok: false, blockedVar: name };
       const resolved = env[name];
       if (resolved === undefined || resolved === "") return { ok: false, missingVar: name };
     }

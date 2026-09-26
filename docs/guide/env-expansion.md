@@ -24,3 +24,13 @@ the reason rides on a separate `skipReason` field (`env-missing` /
 [configuration sources and layers](layers.md)). Values are never
 persisted anywhere by the plugin; the CLI writes `${VAR}` through literally,
 so secrets can live in the environment while configs live in git.
+
+**Credential masking.** Credential-suffixed variable names (matching
+`(API_?KEY|TOKEN|SECRET|PASSWO?RD|CREDENTIALS?|PRIVATE_?KEY)$`, case
+insensitive) are **not expanded by default** — project config files ship with
+the repository, so `Bearer ${GITHUB_TOKEN}` in a cloned file is an exfiltration
+channel into the spawned process or the remote endpoint. A masked reference
+skips the row with an `env-blocked` diagnostic naming the variable (never its
+value). Setting `DSH_MCP_EXPAND_ALLOW=NAME1,NAME2` switches to a strict
+allowlist: only listed names expand, everything else (credential or not)
+skips as `env-blocked`.

@@ -688,6 +688,58 @@ try {
     assert.ok(await registry2.waitForState(dir2, "hot26", (state) => state?.phase === "active", 5000), ".mcp.json rows return once the switch is cleared");
     pass("DSH_MCP_IGNORE_MCP_JSON gates reading, watching, and partitions of the project .mcp.json layer");
 
+    // 27. env-blocked：凭证类 ${VAR} 引用拒绝展开（默认黑名单，值已设置也一样）；
+    // DSH_MCP_EXPAND_ALLOW 白名单显式放行。
+    {
+      const dirBlk = await realpath(await mkdtemp(join(tmpdir(), "dsh-mcp-envblocked-")));
+      const savedCwdBlk = process.cwd();
+      try {
+        process.env.CC_BLK_TOKEN = "tok-value";
+        process.env.CC_BLK_PLAIN = "node";
+        delete process.env.DSH_MCP_EXPAND_ALLOW;
+        // chdir 进本项目：否则进程 cwd 还停在前一 case 的目录，把别的项目行装进来。
+        process.chdir(dirBlk);
+        const rowWith = (envVar) => ({
+          id: "panel-mcp-blocked", name: "@deepseek-ai/dsh-mcp-client",
+          config: { serverName: "blocked", transport: "stdio", command: "node", args: [], env: { T: "${" + envVar + "}" }, cwd: "", toolCallTimeoutMs: 60000, failOnStartupError: false, reconnect: { enabled: true, initialDelayMs: 500, maxDelayMs: 30000, maxAttempts: 10 } }
+        });
+        await writeManagedRows(projectMcpFile(dirBlk), [rowWith("CC_BLK_TOKEN")], { createIfMissing: true });
+        const ctxBlk = fakeCtx();
+        const registryBlk = new ProjectMcpRegistry(ctxBlk, {
+          globalNames: async () => [],
+          userLayerPaths: { mcpYml: join(dirBlk, "nohome", "mcp.yml"), mcpJson: join(dirBlk, "nohome", "mcp.json"), profilesDir: join(dirBlk, "nohome", "profiles") }
+        });
+        ctxBlk.agentsList.push(fakeAgent("session-blk", dirBlk));
+        await registryBlk.reconcileNow();
+        assert.equal(ctxBlk.mounts.filter((config) => config.serverName === "blocked").length, 0, "credential-suffixed var is never expanded into a mount");
+        const diagBlk = await readDiag(dirBlk);
+        assert.ok(diagBlk.some((row) => row.kind === "env-blocked" && row.blockedVar === "CC_BLK_TOKEN" && !JSON.stringify(row).includes("tok-value")), "env-blocked diag names the variable, never the value");
+        const summaryBlk = await readDiagSummary(dirBlk);
+        assert.equal(summaryBlk.skippedByReason["env-blocked"], 1, "summary counts env-blocked skips");
+
+        process.env.DSH_MCP_EXPAND_ALLOW = "CC_BLK_TOKEN";
+        await writeManagedRows(projectMcpFile(dirBlk), [rowWith("CC_BLK_TOKEN")], { createIfMissing: true });
+        await registryBlk.reconcileNow();
+        assert.equal(ctxBlk.mounts.filter((config) => config.serverName === "blocked").length, 1, "explicit allowlist re-enables the reference");
+
+        delete process.env.DSH_MCP_EXPAND_ALLOW;
+        await writeManagedRows(projectMcpFile(dirBlk), [rowWith("CC_BLK_PLAIN")], { createIfMissing: true });
+        await registryBlk.reconcileNow();
+        assert.equal(ctxBlk.mounts.filter((config) => config.env?.T === "node").length, 1, "non-credential vars expand under the default blacklist");
+        for (const disposer of ctxBlk.disposers) {
+          const cleanup = disposer();
+          if (typeof cleanup === "function") cleanup();
+        }
+        pass("credential-suffixed ${VAR} refs are blocked by default and allowed via DSH_MCP_EXPAND_ALLOW");
+      } finally {
+        process.chdir(savedCwdBlk);
+        delete process.env.CC_BLK_TOKEN;
+        delete process.env.CC_BLK_PLAIN;
+        delete process.env.DSH_MCP_EXPAND_ALLOW;
+        await rmRetry(dirBlk);
+      }
+    }
+
     // 28. 跨来源同服务去重（集成）：事故复刻——proj6 的 yml unityMCP 与用户层
     // unity-mcp 是同一服务器的两种写法（args 差 --offline），proj6 只装一条，
     // 被剔除者进 diag 并告警；其它没有 yml twin 的项目照常挂 unity-mcp。

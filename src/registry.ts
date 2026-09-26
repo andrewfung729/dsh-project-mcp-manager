@@ -71,6 +71,7 @@ import {
   denySetFor,
   effectiveServerNames,
   expandEnvRefs,
+  EXPAND_ALLOW_ENV,
   inputFromPatchRow,
   invalidToolGlobs,
   mcpServerInputSchema,
@@ -1792,8 +1793,15 @@ export class ProjectMcpRegistry {
     let input = inputFromPatchRow(item.row);
     // ${VAR} 串内插值展开对所有来源统一（CLI 按生态习惯写进原生文件的
     // Bearer ${TOKEN} 也要生效）；值不含 ${NAME} 引用的行行为不变。
+    // 凭证类变量（或白名单外的变量）缺失/被遮蔽同样整体拒绝：项目内配置
+    // 文件随仓库分发，把宿主环境变量交给仓库作者控制的进程/端点等于外泄通道。
     const expanded = expandEnvRefs(input, process.env);
     if (!expanded.ok) {
+      if (expanded.blockedVar !== undefined) {
+        await container.diag({ kind: "env-blocked", rawName: item.rawName, effectiveName, blockedVar: expanded.blockedVar });
+        this.ctx.logger.warn(`${container.label} "${item.rawName}" 未装载：环境变量 \${${expanded.blockedVar}} 属凭证类默认遮蔽（或不在 ${EXPAND_ALLOW_ENV} 白名单内），拒绝展开`);
+        return { skip: "env-blocked" };
+      }
       await container.diag({ kind: "env-missing", rawName: item.rawName, effectiveName, missingVar: expanded.missingVar });
       this.ctx.logger.warn(`${container.label} "${item.rawName}" 未装载：环境变量 \${${expanded.missingVar}} 未设置`);
       return { skip: "env-missing" };

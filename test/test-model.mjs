@@ -9,7 +9,9 @@ import {
   denySetFor,
   effectiveServerNames,
   expandEnvRefs,
+  EXPAND_ALLOW_ENV,
   inputFromPatchRow,
+  isEnvRefAllowed,
   isUrlOrEnvRef,
   jsonTypeOfTransport,
   matchToolGlob,
@@ -228,6 +230,20 @@ assert.equal(httpOk.input.url, "http://localhost:3000/mcp");
 assert.equal(httpOk.input.headers.Authorization, "Bearer t"); // CC 常见写法：Bearer 前缀 + 串内引用
 assert.equal(httpOk.input.headers.X, "t");
 pass("http url/headers interpolate in-string refs incl. Bearer ${TOKEN}");
+
+// 14b. 凭证类 ${VAR} 引用默认遮蔽；DSH_MCP_EXPAND_ALLOW 白名单放行
+assert.equal(isEnvRefAllowed("BIN", {}), true, "plain names allowed by default");
+assert.equal(isEnvRefAllowed("GITHUB_TOKEN", { GITHUB_TOKEN: "x" }), false, "credential-suffixed names blocked even when set");
+assert.equal(isEnvRefAllowed("DEEPSEEK_API_KEY", {}), false, "API_KEY blocked");
+assert.equal(isEnvRefAllowed("MY_SECRET", {}), false, "SECRET blocked");
+assert.equal(isEnvRefAllowed("DB_PASSWORD", {}), false, "PASSWORD blocked");
+assert.equal(isEnvRefAllowed("PRIVATE_KEY", {}), false, "PRIVATE_KEY blocked");
+assert.equal(isEnvRefAllowed("GITHUB_TOKEN", { [EXPAND_ALLOW_ENV]: "GITHUB_TOKEN" }), true, "allowlist admits credential names");
+assert.equal(isEnvRefAllowed("BIN", { [EXPAND_ALLOW_ENV]: "OTHER" }), false, "allowlist turns strict: unlisted plain names blocked too");
+const credRef = { serverName: "h", transport: "streamable-http", url: "https://x/", headers: { Authorization: "Bearer ${GITHUB_TOKEN}" } };
+assert.deepEqual(expandEnvRefs(credRef, { GITHUB_TOKEN: "tok" }), { ok: false, blockedVar: "GITHUB_TOKEN" }, "credential ref fails with blockedVar, never the value");
+assert.equal(expandEnvRefs(credRef, { GITHUB_TOKEN: "tok", [EXPAND_ALLOW_ENV]: "GITHUB_TOKEN" }).ok, true, "allowlist unlocks the same ref");
+pass("credential-suffixed env refs blocked by default; DSH_MCP_EXPAND_ALLOW switches to a strict allowlist");
 
 // 15. jsonServerEntrySchema 容忍生态附加字段与 DSH 透传键
 assert.equal(jsonServerEntrySchema.safeParse({ command: "npx", args: ["-y", "pkg"], timeout: 5000, scope: "project" }).success, true);

@@ -18,3 +18,11 @@
 `plugin-throw`；其它如 `name-taken` / `idle` / `give-up` 见
 [配置来源与分层](layers.zh.md)）。插件任何写路径都不落盘展开后的值；
 CLI 写入时 `${VAR}` 原样保留——配置可以进 git，凭据留在环境里。
+
+**凭证遮蔽。** 凭证类后缀的变量名（匹配
+`(API_?KEY|TOKEN|SECRET|PASSWO?RD|CREDENTIALS?|PRIVATE_?KEY)$`，忽略大小写）
+**默认不展开**——项目配置文件随仓库分发，克隆来的文件里写
+`Bearer ${GITHUB_TOKEN}` 等于把宿主凭据送进 spawn 的进程或远端端点。被遮蔽
+的引用以 `env-blocked` 诊断跳过该行，只记变量名（绝不记值）。设置
+`DSH_MCP_EXPAND_ALLOW=NAME1,NAME2` 后切换为严格白名单：只有名单内的变量
+展开，其余（含非凭证名）一律 `env-blocked`。
