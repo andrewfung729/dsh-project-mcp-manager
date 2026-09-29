@@ -8,14 +8,17 @@
 `.mcp.json`；不连接运行中的 dsh 宿主，宿主经文件监听自动收敛）。
 
 `dsh-mcp` **不是** `dsh` 的子命令。`dsh mcp` 会去启动名叫 `mcp` 的 profile。
-`dsh plugin add` 也不会把 bin 放进 `PATH`。profile 安装后，在项目目录执行该
-profile 的 bin（`$DSH_HOME` 缺省是 `~/.dsh`）：
+`dsh plugin add` 也不会把 bin 放进 `PATH`。profile 安装后，在项目目录用 `node`
+执行真正的入口（`$DSH_HOME` 缺省是 `~/.dsh`）。这样不依赖文件的执行位：
 
 ```bash
-"$HOME/.dsh/profiles/web/node_modules/.bin/dsh-mcp" trust
-"$HOME/.dsh/profiles/web/node_modules/.bin/dsh-mcp" status
+node "$HOME/.dsh/profiles/web/node_modules/dsh-project-mcp-manager/lib/cli.js" trust
+node "$HOME/.dsh/profiles/web/node_modules/dsh-project-mcp-manager/lib/cli.js" status
 ```
 
+直接执行 `.bin/dsh-mcp` 时，内核要目标 `lib/cli.js` 可执行。`tsc` 按 umask
+写出的是 `644`/`664`，没有执行位，bash 会报 `Permission denied`。本包的 build
+会把它改成 `755`；已装上的旧产物请用上面的 `node` 命令，或 `chmod +x` 那个文件。
 Windows 上同一 `.bin` 目录里的入口是 `dsh-mcp.cmd`。不要用不带路径的
 `pnpm --dir <profile> exec dsh-mcp trust`：`--dir` 会改工作目录，裸 `trust`
 会把 profile 目录登记成项目根。

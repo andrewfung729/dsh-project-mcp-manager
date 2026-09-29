@@ -10,14 +10,19 @@ connect to a running dsh host, which converges via the file watchers).
 
 `dsh-mcp` is **not** a `dsh` subcommand. `dsh mcp` boots a profile named `mcp`.
 `dsh plugin add` does not put the bin on `PATH`. After a profile install, run
-the profile bin from the project directory (`$DSH_HOME` defaults to `~/.dsh`):
+the real entry with `node` from the project directory (`$DSH_HOME` defaults to
+`~/.dsh`). This does not require the executable bit:
 
 ```bash
-"$HOME/.dsh/profiles/web/node_modules/.bin/dsh-mcp" trust
-"$HOME/.dsh/profiles/web/node_modules/.bin/dsh-mcp" status
+node "$HOME/.dsh/profiles/web/node_modules/dsh-project-mcp-manager/lib/cli.js" trust
+node "$HOME/.dsh/profiles/web/node_modules/dsh-project-mcp-manager/lib/cli.js" status
 ```
 
-On Windows the shim is `dsh-mcp.cmd` in that same `.bin` directory. Do not use
+Executing `.bin/dsh-mcp` directly asks the kernel to execute `lib/cli.js`.
+`tsc` writes that file as `644`/`664` under a normal umask, so bash reports
+`Permission denied`. This package's build chmods it to `755`. For an already
+installed copy, use the `node` command above, or `chmod +x` the file. On
+Windows the shim is `dsh-mcp.cmd` in that same `.bin` directory. Do not use
 `pnpm --dir <profile> exec dsh-mcp trust` without a path: `--dir` changes the
 working directory, so a bare `trust` registers the profile directory.
 

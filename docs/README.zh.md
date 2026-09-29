@@ -91,11 +91,11 @@ pnpm add link:<你的 dsh-mcp-project 源码目录>   # 例如 D:\dev\dsh-mcp-pr
 升级到最新，`@0.6.0` 锁定到指定版本。
 
 **运行 `dsh-mcp`**：它是包的 bin，不是 `dsh` 的子命令；profile 安装不会把它放进
-`PATH`。在项目目录执行：
+`PATH`。用 `node` 执行，避免 `664` 权限导致 `Permission denied`：
 
 ```bash
-"$HOME/.dsh/profiles/web/node_modules/.bin/dsh-mcp" trust
-"$HOME/.dsh/profiles/web/node_modules/.bin/dsh-mcp" status
+node "$HOME/.dsh/profiles/web/node_modules/dsh-project-mcp-manager/lib/cli.js" trust
+node "$HOME/.dsh/profiles/web/node_modules/dsh-project-mcp-manager/lib/cli.js" status
 ```
 
 详见 [CLI `dsh-mcp`](guide/cli.zh.md)。设了 `$DSH_HOME` 就替换 `$HOME/.dsh`。

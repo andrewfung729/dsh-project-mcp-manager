@@ -114,11 +114,12 @@ the desired version suffix — `@latest` upgrades to the newest release, `@0.6.0
 pins to a specific version.
 
 **Running `dsh-mcp`**: it is a package bin, not a `dsh` subcommand, and a
-profile install does not put it on `PATH`. From the project directory:
+profile install does not put it on `PATH`. Run it with `node` so a `664`
+file does not fail with `Permission denied`:
 
 ```bash
-"$HOME/.dsh/profiles/web/node_modules/.bin/dsh-mcp" trust
-"$HOME/.dsh/profiles/web/node_modules/.bin/dsh-mcp" status
+node "$HOME/.dsh/profiles/web/node_modules/dsh-project-mcp-manager/lib/cli.js" trust
+node "$HOME/.dsh/profiles/web/node_modules/dsh-project-mcp-manager/lib/cli.js" status
 ```
 
 See [CLI `dsh-mcp`](docs/guide/cli.md). `$DSH_HOME` replaces `$HOME/.dsh` when set.

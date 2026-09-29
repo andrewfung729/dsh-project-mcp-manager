@@ -43,7 +43,7 @@
   },
   "scripts": {
     "clean": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\"",
-    "build": "npm run clean && tsc -p tsconfig.json",
+    "build": "npm run clean && tsc -p tsconfig.json && node -e \"require('node:fs').chmodSync('lib/cli.js',0o755)\"",
     "prepack": "npm run build",
     "pretest": "npm run build",
     "test": "node test/test-model.mjs && node test/test-mcp-file.mjs && node test/test-json-file.mjs && node test/test-json-write.mjs && node test/test-trust.mjs && node test/test-registry.mjs && node test/test-cli.mjs"

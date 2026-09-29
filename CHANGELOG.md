@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `dsh-mcp` follows a pnpm `.bin` symlink before deciding it is the process
   entry. The old lexical compare exited 0 with no output.
+- The build marks `lib/cli.js` executable. `tsc` otherwise leaves it `644`/`664`,
+  and executing the `.bin` symlink then fails with `Permission denied`.
 - The CLI no longer loads `@deepseek-ai/dsh-mcp-client`. A profile install
   sets `autoInstallPeers: false`, so a separate Node process cannot resolve
   that package's peers. Catalog merge and diagnostic parsing live in

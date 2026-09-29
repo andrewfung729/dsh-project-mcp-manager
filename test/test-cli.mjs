@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { symlinkSync, readFileSync } from "node:fs";
+import { statSync, symlinkSync, readFileSync } from "node:fs";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
@@ -625,7 +625,15 @@ try {
   await rm(dir, { recursive: true, force: true });
 }
 
-// 23. profile 安装后的 bin 是符号链接。入口必须跟随 realpath，否则 --help 静默退出 0。
+// 23. tsc 产物默认是 644/664。bin 符号链接要能被内核执行，目标必须有执行位。
+{
+  const cliFile = fileURLToPath(new URL("../lib/cli.js", import.meta.url));
+  const mode = statSync(cliFile).mode & 0o777;
+  assert.ok((mode & 0o111) !== 0, "lib/cli.js must be executable, got " + mode.toString(8));
+  pass("built cli.js is executable for the .bin symlink");
+}
+
+// 24. profile 安装后的 bin 是符号链接。入口必须跟随 realpath，否则 --help 静默退出 0。
 {
   const linkDir = await mkdtemp(join(tmpdir(), "dsh-mcp-bin-"));
   try {
