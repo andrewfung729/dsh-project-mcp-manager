@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Project-layer MCP resource providers are no longer registered on the host
+  global layer. The plugin isolates `mcpResources` for those mounts, then
+  registers the captured provider only on sessions that should see that
+  effective name. Instructions for a hidden name are blanked with an empty
+  `mcp:<name>` section. User-layer resource names stay host-global; project-side
+  suppression still cannot remove them.
 - `dsh-mcp` follows a pnpm `.bin` symlink before deciding it is the process
   entry. The old lexical compare exited 0 with no output.
 - The build marks `lib/cli.js` executable. `tsc` otherwise leaves it `644`/`664`,

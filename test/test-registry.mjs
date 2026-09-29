@@ -92,12 +92,26 @@ function fakeCtx() {
     tools: {
       schemas: () => schemas
     },
+    isolate(name) {
+      const child = Object.create(this);
+      child.isolated = name;
+      child.services = Object.create(null);
+      child.provide = (serviceName, value) => {
+        child.services[serviceName] = value;
+        return () => {
+          delete child.services[serviceName];
+        };
+      };
+      return child;
+    },
     plugin(_plugin, config) {
       let resolved = false;
       const fiber = {
         config,
         dispose: async () => {
           disposals.push(config.serverName);
+          const capture = this.services?.mcpResources;
+          capture?.forget?.(config.serverName);
         },
         then(onFulfilled) {
           if (!resolved) {
@@ -107,6 +121,17 @@ function fakeCtx() {
           return Promise.resolve();
         }
       };
+      // 模拟 dsh-mcp-client：项目层 fiber 挂在隔离 ctx 上时，resource 注册打进捕获器。
+      const capture = this.services?.mcpResources;
+      if (this.isolated === "mcpResources" && typeof capture?.register === "function") {
+        const provider = { serverName: config.serverName };
+        const forget = capture.register(config.serverName, provider);
+        const previous = capture.forget;
+        capture.forget = (serverName) => {
+          if (serverName === config.serverName) forget();
+          else previous?.(serverName);
+        };
+      }
       mounts.push(config);
       return fiber;
     },
@@ -122,6 +147,8 @@ function fakeCtx() {
 
 function fakeAgent(id, cwd) {
   const denies = [];
+  const resourceRegs = [];
+  const instructionSections = [];
   return {
     id,
     session: { header: { cwd } },
@@ -133,9 +160,29 @@ function fakeAgent(id, cwd) {
           denies.push(denyNames);
           return () => {};
         }
+      },
+      mcpResources: {
+        register(serverName, provider) {
+          resourceRegs.push({ serverName, provider });
+          return () => {
+            const index = resourceRegs.findIndex((entry) => entry.serverName === serverName && entry.provider === provider);
+            if (index >= 0) resourceRegs.splice(index, 1);
+          };
+        }
+      },
+      systemPrompt: {
+        getSectionOrder() {
+          return 40;
+        },
+        section(section) {
+          instructionSections.push(section);
+          return () => {};
+        }
       }
     },
-    denies
+    denies,
+    resourceRegs,
+    instructionSections
   };
 }
 
@@ -290,6 +337,10 @@ try {
   await registry.reconcileNow();
   assert.equal(agentA.denies.length, 0, "session in the owning project is never restricted");
   assert.deepEqual(agentB.denies[agentB.denies.length - 1], ["mcp__" + mounted.serverName + "__echo"]);
+  assert.ok(agentA.resourceRegs.some((entry) => entry.serverName === mounted.serverName), "owning session receives the captured resource provider");
+  assert.ok(!agentB.resourceRegs.some((entry) => entry.serverName === mounted.serverName), "other session does not receive the captured resource provider");
+  assert.ok(agentB.instructionSections.some((section) => section.name === "mcp:" + mounted.serverName && section.text === ""), "other session shadows foreign server instructions");
+  assert.ok(!agentA.instructionSections.some((section) => section.name === "mcp:" + mounted.serverName), "owning session keeps the server instructions section");
   pass("registry denies other projects' servers per session and keeps the session's own");
 
   // 3. 快照：项目分区含一行，scope 标注工作区

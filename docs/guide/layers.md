@@ -25,7 +25,11 @@ described in [configuration format](format.md).
 
 - Project-layer rows: each project mounts its own `mcp-client` instance, made
   visible only to sessions whose cwd is that project via
-  `tools.restrict({ deny })`.
+  `tools.restrict({ deny })`. Resource providers for those rows are captured
+  off the host global layer and re-registered only on sessions that should see
+  them. Instructions for a hidden effective name are blanked with an empty
+  `mcp:<name>` section. User-layer resource names stay in the host global
+  layer; project-side suppression does not remove them.
 - User-layer rows: **exactly one connection at the host level**, independent of
   the number of projects, visible to every session; no more per-project
   fan-out. An empty `cwd` inherits the host working directory (an empty

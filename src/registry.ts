@@ -16,7 +16,10 @@
  *     无关），避免 dsh-mcp-client 按进程根的 serverName 预留冲突；
  *   - 会话可见性：agent 创建时按其会话 cwd 解析项目，对该 agent 层应用
  *     tools.restrict({ deny })，deny 掉「除本会话项目外的全部项目服务器」；
- *     目录变化（项目文件增删改、新 agent、装载 settle）都会重扫。
+ *     项目层的 resource provider 不进宿主全局层（isolate 捕获后再按同一张
+ *     hidden 生效名挂回该看的会话）；hidden 名字的 instructions 用空的
+ *     `mcp:<name>` section 盖住。用户层 resource 名字仍在宿主全局层，
+ *     项目侧压制盖不住它。目录变化都会重扫。
  *
  * 子代理（subagent）不继承父 agent 层的 restrict，但本注册表对每个 live
  * agent（含子代理）都按各自会话 cwd 应用同样的 deny 规则，因此行为一致。
@@ -64,6 +67,7 @@ import {
   type McpRowSource,
   type SourcedRow
 } from "./json-file.js";
+import { installProjectResourceCapture, type ResourceCaptureHost } from "./resource-capture.js";
 import { findProjectRoot } from "./project-root.js";
 import { isProjectTrusted, readTrustedProjects, trustAllEnabled, trustFileIn, TRUST_FILE } from "./trust.js";
 import {
@@ -485,6 +489,18 @@ export class ProjectMcpRegistry {
   private readonly agentProjects = new Map<string, string | undefined>();
   /** agent id → 当前 restrict 的 disposer。 */
   private readonly restrictions = new Map<string, () => void>();
+  /**
+   * 项目层装载用的隔离 ctx。上面的 mcpResources 是捕获器，不是宿主服务。
+   * 建一次，全部项目层 fiber 共用。
+   */
+  private projectPluginCtx: ResourceCaptureHost | undefined;
+  /** 生效名 → 捕获到的 resource provider。身份用引用，过期 disposer 不能删掉新一代。 */
+  private readonly capturedResources = new Map<string, unknown>();
+  /** agent id → 生效名 → 挂在该会话 scope 上的 register disposer。 */
+  private readonly agentResourceRegs = new Map<string, Map<string, () => void>>();
+  /** agent id → 本轮 instructions 空 section 的合并 disposer。 */
+  private readonly instructionShadows = new Map<string, () => void>();
+  private resourceCaptureWarned = false;
 
   private watcher?: ReturnType<typeof chokidar.watch>;
   private watchedFiles: string[] = [];
@@ -608,6 +624,25 @@ export class ProjectMcpRegistry {
       }
     }
     this.restrictions.clear();
+    for (const regs of this.agentResourceRegs.values()) {
+      for (const disposer of regs.values()) {
+        try {
+          disposer();
+        } catch {
+          // agent 已销毁
+        }
+      }
+    }
+    this.agentResourceRegs.clear();
+    for (const disposer of this.instructionShadows.values()) {
+      try {
+        disposer();
+      } catch {
+        // agent 已销毁
+      }
+    }
+    this.instructionShadows.clear();
+    this.capturedResources.clear();
   }
 
   private disposeServerFibers(servers: Map<string, ProjectServerState>): void {
@@ -1580,7 +1615,8 @@ export class ProjectMcpRegistry {
     if ("skip" in built) return built.skip;
     let fiber: any;
     try {
-      fiber = this.ctx.plugin(mcpClient as any, built.config);
+      const pluginCtx = container.scope === "project" ? this.projectPluginContext() : this.ctx;
+      fiber = pluginCtx.plugin(mcpClient as any, built.config);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       await container.diag({ kind: "plugin-throw", effectiveName, error: message });
@@ -1686,6 +1722,10 @@ export class ProjectMcpRegistry {
     }
     const state = container.servers.get(rawName);
     if (state === undefined) return;
+    if (state.scope === "project" && this.capturedResources.has(state.effectiveName)) {
+      this.capturedResources.delete(state.effectiveName);
+      this.kickSweep();
+    }
     container.servers.delete(rawName);
     state.phase = "unloading";
     try {
@@ -1845,7 +1885,147 @@ export class ProjectMcpRegistry {
       const deny = expandToToolNames(hidden, toolIds);
       deny.push(...this.toolFilterDeniesForSession(project, toolIds));
       this.applyRestriction(agent, deny);
+      this.syncResourceVisibility(agent, hidden, groups);
     }
+  }
+
+  /**
+   * 项目层装载 ctx：isolate 掉 mcpResources，换成捕获器。宿主没有这两个方法时
+   * 退回原 ctx，并告警一次——那种宿主上 resource 名字仍会漏进每个会话。
+   */
+  private projectPluginContext(): any {
+    if (this.projectPluginCtx !== undefined) return this.projectPluginCtx;
+    const installed = installProjectResourceCapture(this.ctx, {
+      note: (server, provider) => this.noteCapturedResource(server, provider),
+      forget: (server, provider) => this.forgetCapturedResource(server, provider),
+    });
+    if (!installed.captured && !this.resourceCaptureWarned) {
+      this.resourceCaptureWarned = true;
+      this.ctx.logger.warn("宿主 context 没有 isolate/provide，项目 MCP 的 resource 仍会注册进全局层");
+    }
+    this.projectPluginCtx = installed.ctx;
+    return installed.ctx;
+  }
+
+  private noteCapturedResource(server: string, provider: unknown): void {
+    this.capturedResources.set(server, provider);
+    this.kickSweep();
+  }
+
+  private forgetCapturedResource(server: string, provider: unknown): void {
+    if (this.capturedResources.get(server) !== provider) return;
+    this.capturedResources.delete(server);
+    this.kickSweep();
+  }
+
+  /**
+   * 把捕获到的项目层 provider 挂到本会话该看的 scope 上，并盖住 hidden 名字的
+   * instructions。条目级 tools.allow/deny 不进这张表：那只藏工具，不表示这台
+   * 服务器不属于本会话。用户层 resource 名字在宿主全局层，这里删不掉。
+   */
+  private syncResourceVisibility(
+    agent: any,
+    hidden: string[],
+    groups: { projectRoot: string; effectiveNames: string[] }[]
+  ): void {
+    const activeProjectNames = new Set(groups.flatMap((group) => group.effectiveNames));
+    const hiddenSet = new Set(hidden);
+    const wanted: string[] = [];
+    for (const name of this.capturedResources.keys()) {
+      if (activeProjectNames.has(name) && !hiddenSet.has(name)) wanted.push(name);
+    }
+    this.syncAgentResourceRegs(agent, wanted);
+    this.syncInstructionShadows(agent, hidden);
+  }
+
+  private syncAgentResourceRegs(agent: any, wanted: string[]): void {
+    let regs = this.agentResourceRegs.get(agent.id);
+    if (regs === undefined) {
+      regs = new Map();
+      this.agentResourceRegs.set(agent.id, regs);
+    }
+    const wantedSet = new Set(wanted);
+    for (const [name, disposer] of regs) {
+      if (wantedSet.has(name)) continue;
+      regs.delete(name);
+      try {
+        disposer();
+      } catch {
+        // agent 层已销毁
+      }
+    }
+    if (wanted.length === 0) return;
+    const register = agent?.ctx?.mcpResources?.register;
+    if (typeof register !== "function") {
+      if (!this.resourceCaptureWarned) {
+        this.resourceCaptureWarned = true;
+        this.ctx.logger.warn("会话资源隔离不可用：agent.ctx.mcpResources.register 不存在，项目 MCP 的 resource 不会挂回该看的会话");
+      }
+      return;
+    }
+    for (const name of wanted) {
+      if (regs.has(name)) continue;
+      const provider = this.capturedResources.get(name);
+      if (provider === undefined) continue;
+      try {
+        const disposer = register.call(agent.ctx.mcpResources, name, provider);
+        regs.set(name, typeof disposer === "function" ? disposer : () => {});
+      } catch (error) {
+        this.ctx.logger.warn(`会话 ${agent.id} 的项目 MCP 资源挂载暂未应用：${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  private syncInstructionShadows(agent: any, hidden: string[]): void {
+    const previous = this.instructionShadows.get(agent.id);
+    if (previous !== undefined) {
+      this.instructionShadows.delete(agent.id);
+      try {
+        previous();
+      } catch {
+        // agent 层已销毁
+      }
+    }
+    if (hidden.length === 0) return;
+    const prompt = agent?.ctx?.systemPrompt;
+    if (typeof prompt?.section !== "function") return;
+    let order = 0;
+    try {
+      if (typeof prompt.getSectionOrder === "function") order = prompt.getSectionOrder("MCP_SERVERS");
+    } catch {
+      order = 0;
+    }
+    const disposers: Array<() => void> = [];
+    try {
+      for (const name of hidden) {
+        const disposer = prompt.section({
+          name: `mcp:${name}`,
+          order,
+          interpolate: false,
+          text: "",
+        });
+        if (typeof disposer === "function") disposers.push(disposer);
+      }
+    } catch (error) {
+      for (const disposer of disposers) {
+        try {
+          disposer();
+        } catch {
+          // 半截注册，能撤的先撤
+        }
+      }
+      this.ctx.logger.warn(`会话 ${agent.id} 的项目 MCP instructions 过滤暂未应用：${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+    this.instructionShadows.set(agent.id, () => {
+      for (const disposer of disposers) {
+        try {
+          disposer();
+        } catch {
+          // agent 层已销毁
+        }
+      }
+    });
   }
 
   /** 本会话可见的服务器上，条目 tools.allow/deny 展开成已注册工具名。 */
@@ -1920,6 +2100,26 @@ export class ProjectMcpRegistry {
       this.restrictions.delete(agent.id);
       try {
         previous();
+      } catch {
+        // 已随 agent 销毁
+      }
+    }
+    const regs = this.agentResourceRegs.get(agent.id);
+    if (regs !== undefined) {
+      this.agentResourceRegs.delete(agent.id);
+      for (const disposer of regs.values()) {
+        try {
+          disposer();
+        } catch {
+          // 已随 agent 销毁
+        }
+      }
+    }
+    const shadow = this.instructionShadows.get(agent.id);
+    if (shadow !== undefined) {
+      this.instructionShadows.delete(agent.id);
+      try {
+        shadow();
       } catch {
         // 已随 agent 销毁
       }

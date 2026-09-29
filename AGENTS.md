@@ -23,7 +23,8 @@
 - `src/status.ts`：`mcpToolCount(ctx, serverName)` / `mcpToolBudgetStats` / `schemaToolId`（`name` 优先于 `id`，deny 展开与预算共用），按 `mcp__<serverName>__` 前缀统计全局工具层注册数与描述/schema 字节；`parseToolBudgetWarn` 读 `DSH_MCP_TOOL_BUDGET_WARN`（缺省 200 工具 / 256KiB）。
 - `src/dsh-paths.ts`：dsh 家目录与用户层路径的唯一解析口径（registry 与 CLI 共用）。`dshHomeDir(home, env)`（`DSH_HOME` 非空则 `resolve` 它，否则 `<home>/.dsh`）、`dshHomeFor(home|undefined, env)`（**注入的 home 优先于 env**，测试才能隔离真实用户配置）、`userLayerPathsIn(dshHome)`（`mcp.yml`/`mcp.json`/`profiles`）、`profileMcpJsonFile(profilesDir, profile)`、`isValidProfileName`（`PROFILE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/`，显式拒绝 `.`/`..`）、常量 `DSH_HOME_ENV`/`PROFILE_ENV`/`DSH_DIR`/`MCP_YML_FILE`/`DIAG_FILE`。
 - `src/service.ts`：`projectMcp` cordis 服务面（`bindProjectMcpService` + Context 模块增强）；不承诺稳定 API。
-- `test/`：`test-model.mjs`、`test-mcp-file.mjs`、`test-json-file.mjs`、`test-json-write.mjs`、`test-registry.mjs`、`test-cli.mjs`（node 直接跑，无测试框架）。
+- `src/resource-capture.ts`：项目层装载前 `isolate('mcpResources')`，把 resource provider 从宿主全局层截走。不 import cordis。
+- `test/`：`test-model.mjs`、`test-mcp-file.mjs`、`test-json-file.mjs`、`test-json-write.mjs`、`test-trust.mjs`、`test-resource-capture.mjs`、`test-registry.mjs`、`test-cli.mjs`（node 直接跑，无测试框架）。
 - `README.md` / `docs/README.zh.md`：项目介绍、安装/构建、工作原理与安全边界（中英双版，各自链接同语言文档）。
 - `docs/`：按用途分目录——`guide/`（功能文档中英双版：`format.md`/`.zh.md` 配置格式、`layers.md`/`.zh.md` 六层来源与影子优先序、`env-expansion.md`/`.zh.md` `${VAR}` 展开、`cli.md`/`.zh.md` `dsh-mcp` CLI）、`releases/`（`v0.3.1.md`、`v0.4.0.md`、`v0.4.1.md`、`v0.4.2.md`、`v0.4.3.md`、`v0.6.0.md` 发布说明）、`design/`（`adaptation-dsh-0.1.5-rc2.md` / `adaptation-dsh-0.1.5-rc1.md` / `adaptation-dsh-0.1.2-rc1.md` 宿主适配记录、`proposal-json-mcp-config.md` JSON 层设计提案、`proposal-runtime-robustness-and-json-interop.md` 运行时稳健性与 JSON 互通提案）；`docs/README.zh.md` 为中文 README。
 - `CHANGELOG.md`：版本变更记录（`[Unreleased]` 起累积）。
@@ -33,7 +34,7 @@
 ```bash
 pnpm install           # 包管理器为 pnpm（pnpm-lock.yaml 是唯一锁文件）
 pnpm run build         # 先清空 lib 再 tsc -p tsconfig.json → lib/
-pnpm test              # 依次 node 跑 test/ 下六个 .mjs（pretest 先 build）
+pnpm test              # 依次 node 跑 test/ 下的 .mjs（pretest 先 build）
 npx tsc --noEmit       # 仅类型检查
 ```
 
@@ -43,7 +44,7 @@ npx tsc --noEmit       # 仅类型检查
 
 - **生效名 vs 原名**：装载与工具隔离一律用 effectiveServerName（可能与文件里写的 serverName 不同）；模型提示里的工具名为 `mcp__<生效名>__<tool>`。**只有项目行会改名**（`p<hash>_`），全局用户层行保持原名。
 - **全局 vs 项目**：用户层（profile json / 用户 yml / 用户 json）宿主级只挂一条，与项目数无关、不参与按项目的 deny；项目层按需挂载（有会话或进程 cwd），经 `tools.restrict({ deny })` 隔离。项目行遮蔽全局行时，只对该项目的会话 deny 全局工具（项目侧压制），全局实例不卸载。
-- **会话隔离**：deny 传的是**精确工具名**（tools.restrict 对 unknown names 报错），必须先把 serverName 展开成当前注册的工具名再 deny；装载未 settle 时会失败，靠下一次 sweep 补上——不要改成一次性应用。条目 `tools.allow`/`tools.deny`（JSON 亦映射 `includeTools`/`excludeTools`）同样只展开已注册名，glob 匹配，deny 优先，且在 `toOfficialConfig` 时剥掉以免传给 client。
+- **会话隔离**：deny 传的是**精确工具名**（tools.restrict 对 unknown names 报错），必须先把 serverName 展开成当前注册的工具名再 deny；装载未 settle 时会失败，靠下一次 sweep 补上——不要改成一次性应用。项目层 resource 不走这条 deny：装载前 `isolate('mcpResources')` 把 provider 截住，sweep 再按同一张 hidden 生效名挂回该看的会话；hidden 名字的 instructions 用空的 `mcp:<name>` section 盖住。用户层 resource 名字在宿主全局层，项目侧压制盖不住。条目 `tools.allow`/`tools.deny`（JSON 亦映射 `includeTools`/`excludeTools`）同样只展开已注册名，glob 匹配，deny 优先，且在 `toOfficialConfig` 时剥掉以免传给 client。那只藏工具，不表示这台服务器不属于本会话，不要拿它去藏 resource。
 - **同名重装载**：必须先 unmount（释放 serverName 预留）再 mount，顺序在 `reconcileContainer` 里已保证。连接死亡自愈按 **fiber 世代**：这一代曾经有工具、当前 `mcpToolCount===0` 持续超过退避窗口、未 `disabled` 才 unmount-then-mount（单次 0 工具边沿不拆）；新一代首连失败交给官方内部重连。工具恢复则清 `remountCount` / `givenUp`；连续失败满 3 次才 `give-up`。JSON `enabled:false` 不在装载集，不会被复活。`snapshot()` / `serverView()` 进 enqueue、只读上一轮对账内存（`lastScanFiles` / `userLayer`），不读盘、不驱动对账。只改 `tools.allow`/`deny` 就地换 `state.row` 再 `kickSweep`，不拆连接。
 - **配置指纹跳过重读**：`reconcileAll` 入口比对已知项目的 yml/json/cc 与用户层三路径的 `mtimeMs+size`，以及当前 `resolveActiveProfileName()` 与排序后的 `hostGlobalNames`；全同则跳过文件重读、复用上次期望集，仍跑健康巡检 / deny 重扫 / 工具预算 / 摘要。运行中改 `DSH_MCP_PROFILE` 或宿主全局 patch 名集会让指纹失配并重读。
 - **工具预算护栏**：装载/巡检后按生效名统计 `ctx.tools.schemas()` 的数量与描述/schema 字节；超过 `DSH_MCP_TOOL_BUDGET_WARN`（缺省 200 工具 / 256KiB）告警一次并写入 `summary.toolBudget`，**永不裁剪**。

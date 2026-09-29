@@ -178,9 +178,12 @@ pnpm test          # node test/test-model.mjs / test-mcp-file / test-json-file /
 - **Session visibility**: when an agent is created, its session cwd resolves to
   a project, and `tools.restrict({ deny })` is applied to that agent to deny
   every project server except those of the session's own project, plus the
-  global servers suppressed by the project's own rows; a session without a cwd
-  falls back to the owner project (subagents), then to the project containing
-  the dsh process cwd. Released when the session is destroyed.
+  global servers suppressed by the project's own rows. Project-layer resource
+  providers are captured off the host global layer and registered only on
+  sessions that should see that effective name; instructions for a hidden name
+  are blanked. User-layer resource names remain host-global. A session without
+  a cwd falls back to the owner project (subagents), then to the project
+  containing the dsh process cwd. Released when the session is destroyed.
 
 ## Security boundary
 

@@ -138,7 +138,9 @@ pnpm test          # node 直跑 test/ 下六个 .mjs（model / mcp-file / json-
   与文件里写的 `serverName` 可能不同。
 - **会话可见性**：agent 创建时按其会话 cwd 解析项目，对该 agent 应用
   `tools.restrict({ deny })`，deny 掉除本会话项目外的全部项目服务器，以及本项目
-  自身行压制过的全局服务器；会话无 cwd 时回退 owner 项目（子代理），再回退 dsh
+  自身行压制过的全局服务器。项目层 resource provider 不进宿主全局层，只挂回该看的
+  会话；hidden 生效名的 instructions 用空 section 盖住。用户层 resource 名字仍是
+  宿主全局的。会话无 cwd 时回退 owner 项目（子代理），再回退 dsh
   进程 cwd 所在项目。会话销毁时释放。
 
 ## 安全边界
