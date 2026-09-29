@@ -6,7 +6,20 @@ English | [中文](cli.zh.md)
 
 Command-line management for the **native** config files (writes only
 `.dsh/mcp.yml` or `.dsh/mcp.json` — never the legacy `.mcp.json`; it does not
-connect to a running dsh host, which converges via the file watchers):
+connect to a running dsh host, which converges via the file watchers).
+
+`dsh-mcp` is **not** a `dsh` subcommand. `dsh mcp` boots a profile named `mcp`.
+`dsh plugin add` does not put the bin on `PATH`. After a profile install, run
+the profile bin from the project directory (`$DSH_HOME` defaults to `~/.dsh`):
+
+```bash
+"$HOME/.dsh/profiles/web/node_modules/.bin/dsh-mcp" trust
+"$HOME/.dsh/profiles/web/node_modules/.bin/dsh-mcp" status
+```
+
+On Windows the shim is `dsh-mcp.cmd` in that same `.bin` directory. Do not use
+`pnpm --dir <profile> exec dsh-mcp trust` without a path: `--dir` changes the
+working directory, so a bare `trust` registers the profile directory.
 
 ```powershell
 dsh-mcp add gitlab npx -y @modelcontextprotocol/server-gitlab -e GITLAB_TOKEN=${GITLAB_TOKEN}

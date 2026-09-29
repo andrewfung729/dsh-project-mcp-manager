@@ -113,6 +113,16 @@ pnpm add link:<path-to-your-dsh-mcp-project-source>   # e.g. D:\dev\dsh-mcp-proj
 the desired version suffix — `@latest` upgrades to the newest release, `@0.6.0`
 pins to a specific version.
 
+**Running `dsh-mcp`**: it is a package bin, not a `dsh` subcommand, and a
+profile install does not put it on `PATH`. From the project directory:
+
+```bash
+"$HOME/.dsh/profiles/web/node_modules/.bin/dsh-mcp" trust
+"$HOME/.dsh/profiles/web/node_modules/.bin/dsh-mcp" status
+```
+
+See [CLI `dsh-mcp`](docs/guide/cli.md). `$DSH_HOME` replaces `$HOME/.dsh` when set.
+
 ## Build & test
 
 ```powershell

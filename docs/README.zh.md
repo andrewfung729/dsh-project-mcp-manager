@@ -90,6 +90,16 @@ pnpm add link:<你的 dsh-mcp-project 源码目录>   # 例如 D:\dev\dsh-mcp-pr
 **升级/锁定版本**：重跑方式一的 `add` 命令并带上目标版本后缀——`@latest`
 升级到最新，`@0.6.0` 锁定到指定版本。
 
+**运行 `dsh-mcp`**：它是包的 bin，不是 `dsh` 的子命令；profile 安装不会把它放进
+`PATH`。在项目目录执行：
+
+```bash
+"$HOME/.dsh/profiles/web/node_modules/.bin/dsh-mcp" trust
+"$HOME/.dsh/profiles/web/node_modules/.bin/dsh-mcp" status
+```
+
+详见 [CLI `dsh-mcp`](guide/cli.zh.md)。设了 `$DSH_HOME` 就替换 `$HOME/.dsh`。
+
 ## 构建与测试
 
 ```powershell

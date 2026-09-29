@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { symlinkSync, readFileSync } from "node:fs";
 import { access, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { runCli } from "../lib/cli.js";
 import { projectMcpFile } from "../lib/registry.js";
 import { writeManagedRows } from "../lib/mcp-file.js";
@@ -620,6 +623,52 @@ try {
   }
 } finally {
   await rm(dir, { recursive: true, force: true });
+}
+
+// 23. profile 安装后的 bin 是符号链接。入口必须跟随 realpath，否则 --help 静默退出 0。
+{
+  const linkDir = await mkdtemp(join(tmpdir(), "dsh-mcp-bin-"));
+  try {
+    const cliFile = fileURLToPath(new URL("../lib/cli.js", import.meta.url));
+    const link = join(linkDir, "dsh-mcp");
+    symlinkSync(cliFile, link);
+    const viaLink = spawnSync(process.execPath, [link, "--help"], { encoding: "utf8" });
+    assert.equal(viaLink.status, 0, viaLink.stderr);
+    assert.ok(viaLink.stdout.includes("dsh-mcp"), "symlink entry must print help, not exit silently: " + JSON.stringify(viaLink.stdout));
+    pass("cli bin symlink runs the entry instead of exiting silently");
+  } finally {
+    await rm(linkDir, { recursive: true, force: true });
+  }
+}
+
+// 24. 独立进程不能加载宿主客户端。profile 的 autoInstallPeers: false 解析不到那些 peer。
+{
+  const root = fileURLToPath(new URL("../lib/cli.js", import.meta.url));
+  const seen = new Set();
+  const stack = [root];
+  const hits = [];
+  const fromRe = /\bfrom\s+["']([^"']+)["']/g;
+  const dynRe = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+  while (stack.length > 0) {
+    const file = stack.pop();
+    if (seen.has(file)) continue;
+    seen.add(file);
+    const source = readFileSync(file, "utf8");
+    const specs = [];
+    for (const re of [fromRe, dynRe]) {
+      re.lastIndex = 0;
+      let match;
+      while ((match = re.exec(source)) !== null) specs.push(match[1]);
+    }
+    for (const spec of specs) {
+      if (spec === "@deepseek-ai/dsh-mcp-client" || spec.split("/").at(-1) === "registry.js") {
+        hits.push(file + " -> " + spec);
+      }
+      if (spec.startsWith(".")) stack.push(resolve(dirname(file), spec));
+    }
+  }
+  assert.deepEqual(hits, [], "cli module graph must not load the host client");
+  pass("cli module graph does not import registry or dsh-mcp-client");
 }
 
 console.log("\n" + passed + " passed, 0 failed");

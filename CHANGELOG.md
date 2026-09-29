@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `dsh-mcp` follows a pnpm `.bin` symlink before deciding it is the process
+  entry. The old lexical compare exited 0 with no output.
+- The CLI no longer loads `@deepseek-ai/dsh-mcp-client`. A profile install
+  sets `autoInstallPeers: false`, so a separate Node process cannot resolve
+  that package's peers. Catalog merge and diagnostic parsing live in
+  `src/catalog.ts`.
+
 ## [0.6.0] - 2026-09-13
 
 Runtime robustness and JSON interop. **On-demand project mounts (B1) are a

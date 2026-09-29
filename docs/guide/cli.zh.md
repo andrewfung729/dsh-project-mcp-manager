@@ -5,7 +5,20 @@
 [← 返回 README](../README.zh.md) ｜ 相关：[配置格式](format.zh.md) · [配置来源与分层](layers.zh.md) · [`${VAR}` 展开](env-expansion.zh.md)
 
 原生配置文件命令行管理（**只写** `.dsh/mcp.yml` 或 `.dsh/mcp.json`——从不写遗留的
-`.mcp.json`；不连接运行中的 dsh 宿主，宿主经文件监听自动收敛）：
+`.mcp.json`；不连接运行中的 dsh 宿主，宿主经文件监听自动收敛）。
+
+`dsh-mcp` **不是** `dsh` 的子命令。`dsh mcp` 会去启动名叫 `mcp` 的 profile。
+`dsh plugin add` 也不会把 bin 放进 `PATH`。profile 安装后，在项目目录执行该
+profile 的 bin（`$DSH_HOME` 缺省是 `~/.dsh`）：
+
+```bash
+"$HOME/.dsh/profiles/web/node_modules/.bin/dsh-mcp" trust
+"$HOME/.dsh/profiles/web/node_modules/.bin/dsh-mcp" status
+```
+
+Windows 上同一 `.bin` 目录里的入口是 `dsh-mcp.cmd`。不要用不带路径的
+`pnpm --dir <profile> exec dsh-mcp trust`：`--dir` 会改工作目录，裸 `trust`
+会把 profile 目录登记成项目根。
 
 ```powershell
 dsh-mcp add gitlab npx -y @modelcontextprotocol/server-gitlab -e GITLAB_TOKEN=${GITLAB_TOKEN}

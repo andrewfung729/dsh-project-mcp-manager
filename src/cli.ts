@@ -14,6 +14,7 @@
  *
  * @module
  */
+import { realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { mkdir, readdir, readFile } from "node:fs/promises";
@@ -22,7 +23,7 @@ import { byCodeUnit, inputFromPatchRow, mcpServerInputSchema, parseCliTransport,
 import { CC_PROJECT_FILE, ENABLE_MCP_JSON_ENV, FOREIGN_MCP_FORMAT_HINT, IGNORE_MCP_JSON_ENV, JSON_MCP_FILE, mcpJsonLayerEnabled, parseJsonServersValue, readDshJsonFile, readMcpJsonFile, type JsonReadResult, type McpRowSource, type SourcedRow } from "./json-file.js";
 import { MCP_YML_FILE, DIAG_FILE, dshHomeFor, profileMcpJsonFile, userLayerPathsIn } from "./dsh-paths.js";
 import { readJsonServers, toJsonEntry, updateJsonServers } from "./json-write.js";
-import { mergeSourcedRows, parseDiagDocument, projectDshJsonFile, projectMcpFile, projectMcpJsonFile, type DiagDocument, type DiagSummary, type IdentityShadow } from "./registry.js";
+import { mergeSourcedRows, parseDiagDocument, projectDshJsonFile, projectMcpFile, projectMcpJsonFile, type DiagDocument, type DiagSummary, type IdentityShadow } from "./catalog.js";
 import { findProjectRoot } from "./project-root.js";
 import { addTrustedProject, removeTrustedProject, trustFileIn, TRUST_ALL_ENV } from "./trust.js";
 
@@ -1130,9 +1131,21 @@ export async function runCli(argv: string[], io: CliIo, deps: CliDeps = {}): Pro
   }
 }
 
-// 直接执行入口（node lib/cli.js … 或 npm bin shim）
-const invokedPath = process.argv[1];
-if (invokedPath !== undefined && import.meta.url === pathToFileURL(resolve(invokedPath)).href) {
+/** 直接执行才跑 CLI。pnpm 的 `.bin/dsh-mcp` 是符号链接，`argv[1]` 不经 realpath
+ *  会和 `import.meta.url` 对不上，进程以 0 退出且不印任何东西。被测试 import 时
+ *  argv[1] 是测试文件，realpath 之后仍对不上，不会误跑。 */
+function isDirectCliEntry(invokedPath: string | undefined): boolean {
+  if (invokedPath === undefined) return false;
+  let candidate = invokedPath;
+  try {
+    candidate = realpathSync(invokedPath);
+  } catch {
+    // 路径不存在时退回字面路径：库导入不会因此被当成入口。
+  }
+  return import.meta.url === pathToFileURL(resolve(candidate)).href;
+}
+
+if (isDirectCliEntry(process.argv[1])) {
   const code = await runCli(process.argv.slice(2), {
     out: (line) => process.stdout.write(line + "\n"),
     err: (line) => process.stderr.write(line + "\n")
